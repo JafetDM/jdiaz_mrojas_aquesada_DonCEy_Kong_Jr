@@ -1,0 +1,18 @@
+@startuml
+start
+:Iniciar cliente;
+:Leer IP y puerto;
+:Intentar conexión con servidor;
+if (¿Conexión exitosa?) then (Sí)
+  :Enviar role;
+  :Esperar confirmación;
+  if (¿Aceptado?) then (Sí)
+    :Entrar al lobby;
+  else (No)
+    :Servidor lleno;
+  endif
+else (No)
+  :Error de conexión;
+endif
+stop
+@enduml
