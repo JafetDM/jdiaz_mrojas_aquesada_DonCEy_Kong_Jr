@@ -9,41 +9,51 @@
 int main() {
     int sock = 0;
     struct sockaddr_in serv_addr;
-    char buffer[1024] = {0};
-    char *mensaje = "Hola servidor, soy el cliente!";
+    char *mensaje = "Hola desde el cliente en C!";
+    uint32_t msg_len = strlen(mensaje);
 
-    // 1️⃣ Crear el socket
-    sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) {
+    // Crear socket
+    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         perror("Error al crear socket");
-        exit(EXIT_FAILURE);
+        return -1;
     }
 
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(PORT);
 
-    // 2️⃣ Convertir dirección IP de texto a binario
-    if (inet_pton(AF_INET, "192.168.5.150", &serv_addr.sin_addr) <= 0) { 
+    // Cambiar IP según tu red
+    if (inet_pton(AF_INET, "192.168.5.150", &serv_addr.sin_addr) <= 0) {
         // ipconfig getifaddr en0 
         // usar el comando de arriba para obtener IP en mac
-
         perror("Dirección inválida o no soportada");
-        exit(EXIT_FAILURE);
+        return -1;
     }
 
-    // 3️⃣ Conectar al servidor
+    // Conectar
     if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
         perror("Error en connect");
-        exit(EXIT_FAILURE);
+        return -1;
     }
 
-    // 4️⃣ Enviar y recibir datos
-    write(sock, mensaje, strlen(mensaje));
-    read(sock, buffer, 1024);
-    printf("Mensaje del servidor: %s\n", buffer);
+    // 1️⃣ Enviar tamaño del mensaje en formato de red
+    uint32_t net_len = htonl(msg_len);
+    write(sock, &net_len, sizeof(net_len));
 
-    // 5️⃣ Cerrar conexión
+    // 2️⃣ Enviar mensaje
+    write(sock, mensaje, msg_len);
+
+    // 3️⃣ Leer respuesta
+    uint32_t resp_len;
+    read(sock, &resp_len, sizeof(resp_len));
+    resp_len = ntohl(resp_len); // convertir a formato local
+
+    char *buffer = malloc(resp_len + 1);
+    read(sock, buffer, resp_len);
+    buffer[resp_len] = '\0';
+
+    printf("Respuesta del servidor: %s\n", buffer);
+
+    free(buffer);
     close(sock);
-
     return 0;
 }
