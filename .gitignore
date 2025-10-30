@@ -1,0 +1,47 @@
+# Compilación C / C++
+*.o
+*.out
+*.a
+*.so
+*.exe
+*.dll
+*.dSYM/
+*.obj
+*.elf
+
+# Binarios de pruebas
+/server
+/client
+/main
+/test*
+
+# Archivos temporales
+*.log
+*.tmp
+*.swp
+*.swo
+*.bak
+*~
+
+# Archivos generados por el compilador
+*.d
+*.gcda
+*.gcno
+*.gcov
+
+# Archivos de sistema (macOS / Linux)
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# Archivos de Visual Studio Code
+.vscode/
+.vscode-test/
+.history/
+
+# Archivos de entorno o configuraciones locales
+.env
+*.local
