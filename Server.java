@@ -1,11 +1,20 @@
 import java.io.*;
-import java.net.*;
+import java.net.*; // librerias de red
 
 public class Server {
     public static void main(String[] args) {
         final int PORT = 8080;
-        try (ServerSocket serverSocket = new ServerSocket(PORT)) {
+
+        // =================================
+        // PASO 1: Crear el Server socket
+        // =================================
+
+        try (ServerSocket serverSocket = new ServerSocket(PORT)) { // escucha en el pu
             System.out.println("Servidor escuchando en el puerto " + PORT + "...");
+
+            // ServerSocket escucha conexiones entrantes TCP en el puerto 8080.
+
+            // El try-with-resources asegura que el socket se cierre automáticamente al salir. 
 
             Socket clientSocket = serverSocket.accept();
             System.out.println("Cliente conectado desde " + clientSocket.getInetAddress());

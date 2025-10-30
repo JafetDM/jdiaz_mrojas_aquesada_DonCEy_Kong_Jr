@@ -1,4 +1,4 @@
-/* SERVER
+/* SERVER C
 
 Pasos:
 
@@ -18,7 +18,7 @@ para la conexion
 
 */
 
-/* CLIENTE
+/* CLIENTE C
 
 Pasos:
 
@@ -32,5 +32,20 @@ No servira si servidor no esta escuchando
 3 - escribir y recibir datos con funciones write() y read()
 
 6 - cierre de la comunicacion con funcion close()
+
+*/
+
+/*
+
+SERVER Java
+
+Pasos
+
+Crear el socket servidor
+Aceptar un cliente
+Obtener los InputStream y/o OutputStream del cliente.
+Crear unos InputStream y/o OutputStream más adecuados a nuestras necesidades.
+Leer y escribir datos del y al cliente.
+Cerrar el socket.
 
 */
