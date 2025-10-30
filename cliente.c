@@ -23,7 +23,10 @@ int main() {
     serv_addr.sin_port = htons(PORT);
 
     // 2️⃣ Convertir dirección IP de texto a binario
-    if (inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr) <= 0) {
+    if (inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr) <= 0) { 
+        // ipconfig getifaddr en0 
+        // usar el comando de arriba para obtener IP en mac
+
         perror("Dirección inválida o no soportada");
         exit(EXIT_FAILURE);
     }
