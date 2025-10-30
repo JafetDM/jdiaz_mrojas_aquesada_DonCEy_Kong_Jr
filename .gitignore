@@ -1,4 +1,6 @@
-# Compilación C / C++
+# ======================
+# 🧱 COMPILACIÓN EN C
+# ======================
 *.o
 *.out
 *.a
@@ -9,13 +11,18 @@
 *.obj
 *.elf
 
-# Binarios de pruebas
+# Binarios y ejecutables
 /server
 /cliente
 /main
 /test*
+*.bin
 
-# Archivos temporales
+# Archivos intermedios y de depuración
+*.d
+*.gcda
+*.gcno
+*.gcov
 *.log
 *.tmp
 *.swp
@@ -23,25 +30,53 @@
 *.bak
 *~
 
-# Archivos generados por el compilador
-*.d
-*.gcda
-*.gcno
-*.gcov
+# ======================
+# ARCHIVOS JAVA
+# ======================
+*.class
+*.jar
+*.war
+*.ear
+*.iml
 
-# Archivos de sistema (macOS / Linux)
+# Directorios comunes
+/out/
+/build/
+/bin/
+/target/
+
+# Configuración de IDEs
+.idea/
+.vscode/
+.vscode-test/
+*.classpath
+*.project
+*.settings/
+
+# ======================
+# SISTEMA (macOS / Linux)
+# ======================
 .DS_Store
 .AppleDouble
 .LSOverride
-Thumbs.db
+.Trashes
 ehthumbs.db
+Thumbs.db
 desktop.ini
 
-# Archivos de Visual Studio Code
-.vscode/
-.vscode-test/
-.history/
-
-# Archivos de entorno o configuraciones locales
+# ======================
+# ENTORNOS / CONFIGURACIONES
+# ======================
 .env
 *.local
+*.config
+*.properties
+*.ini
+
+# ======================
+# OTROS / UTILITARIOS
+# ======================
+*.log
+*.pid
+*.seed
+*.old
