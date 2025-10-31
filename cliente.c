@@ -30,9 +30,11 @@ int main() {
     // htons() significa host to network short.
 
     // Cambiar IP según tu red
-    if (inet_pton(AF_INET, "192.168.5.150", &serv_addr.sin_addr) <= 0) { // convierte la direccion IP a binario (in_addr)
+    if (inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr) <= 0) { // convierte la direccion IP a binario (in_addr)
         
         // Nota: para conocer el IP de wifi de la Mac en Mac, usar el comando: ipconfig getifaddr en0 
+        // 192.168.5.150
+        // local: 127
         perror("Dirección inválida o no soportada");
         return -1;
     }

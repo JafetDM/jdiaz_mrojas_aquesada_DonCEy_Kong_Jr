@@ -1,7 +1,10 @@
 import java.io.*;
 import java.net.*;
 
-public class ClientHandler implements Runnable {
+public class ClientHandler implements Runnable { 
+    // implements para intefaz de una clase 
+    // utilizar la interfaz Runnable para el metodo run
+    // Thread utiliza un Runnable target, por lo que run debe tener esta interfaz
 
     private final Socket socket;
 
@@ -9,24 +12,34 @@ public class ClientHandler implements Runnable {
         this.socket = socket;
     }
 
-    @Override
+    @Override // redefine run con la base de la misma interfaz que Runnable
     public void run() {
+        // ==============================================================
+        // PASO 3: Obtener los InputStream y/o OutputStream del cliente.
+        // ==============================================================
+
         try (
-            DataInputStream in = new DataInputStream(socket.getInputStream());
+            // crea In y OutStream mas adecuado a nuestras necesidades (socket)
+            DataInputStream in = new DataInputStream(socket.getInputStream()); 
             DataOutputStream out = new DataOutputStream(socket.getOutputStream())
         ) {
-            // 1️⃣ Leer tamaño del mensaje
-            int length = in.readInt();
+
+            // ===============================================
+            // PASO 4: Leer y escribir datos del y al cliente
+            // ===============================================
+            
+            //Leer tamaño del mensaje
+            int length = in.readInt(); 
             byte[] data = new byte[length];
             in.readFully(data);
 
             String mensaje = new String(data, "UTF-8");
             System.out.println("Mensaje recibido: " + mensaje);
 
-            // 2️⃣ Procesar mensaje (puedes agregar lógica del juego aquí)
+            // Procesar mensaje (puedes agregar lógica del juego aquí)
             String respuesta = procesarMensaje(mensaje);
 
-            // 3️⃣ Enviar respuesta
+            // Enviar respuesta
             byte[] responseData = respuesta.getBytes("UTF-8");
             out.writeInt(responseData.length);
             out.write(responseData);
@@ -36,6 +49,10 @@ public class ClientHandler implements Runnable {
         } catch (IOException e) {
             System.err.println("Error con el cliente: " + e.getMessage());
         } finally {
+
+            // ===============================================
+            // PASO 5: Cerrar el socket
+            // ===============================================
             try {
                 socket.close();
             } catch (IOException e) {
