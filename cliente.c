@@ -6,11 +6,26 @@
 
 #define PORT 8080 // puerto TCP
 
+// struct para el paquete 
+struct Paquete {
+    int movimiento;
+    float x;
+    float y;
+};
+
+// Funcion auxiliar para convertir flotantes a formato de red. Los datos que se mandan desde C están en Little Endian. Java los lee en Big Endian.
+
+float convertir_a_formato_red(float f){
+    uint32_t temp;
+    memcpy(&temp, &f, sizeof(float));  // copia los bits de f en temp (que es un int)
+    temp = htonl(temp);                // cambia el orden de bytes del int
+    memcpy(&f, &temp, sizeof(float));  // escribe los bits invertidos de temp en f
+    return f;
+}
+
 int main() {
     int sock = 0; // descriptor del socket.
     struct sockaddr_in serv_addr; // estructura que guarda la dirección del servidor.
-    char *mensaje = "Hola desde el cliente en C!"; // el texto que vamos a enviar.
-    uint32_t msg_len = strlen(mensaje); // longitud del mensaje (cantidad de bytes).
 
 
     // =======================================
@@ -54,39 +69,57 @@ int main() {
         return -1;
     }
 
+    printf("Conectando al servidor\n");
+
     // =======================================
     // PASO 3: Escribir y leer datos
 
-    // Se envía primero la longitud (4 bytes). (A)
-    // Luego se envía el mensaje real (msg_len bytes). (B)
+    // Se convierten los datos a formato de red (htonl para int, para floats se usa funcion auxiliar). (A)
+    // Luego se envía el mensaje en ese formato (msg_len bytes). (B)
 
     // Asi el servidor sabe cuanto leer
     // =======================================
 
     // A) Enviar tamaño del mensaje en formato de red
-    uint32_t net_len = htonl(msg_len); // htonl() = host to network long: convierte el entero (32 bits) a formato de red.
-    write(sock, &net_len, sizeof(net_len));
+    
+    struct Paquete paquete = {1, 10.f, 3.2};
+
+    printf("Paquete a enviar: mov=%d, x=%.2f, y=%.2f\n", paquete.movimiento, paquete.x, paquete.y);
+
+    paquete.movimiento = htonl(paquete.movimiento); // htonl() = host to network long: convierte el entero (32 bits) a formato de red.
+    paquete.y = convertir_a_formato_red(paquete.y); // lo mismo que htonl pero para flotantes
+    paquete.x = convertir_a_formato_red(paquete.x);
+    //uint32_t net_len = htonl(msg_len); // htonl() = host to network long: convierte el entero (32 bits) a formato de red.
+    //write(sock, &net_len, sizeof(net_len));
 
     // B) Enviar mensaje
-    write(sock, mensaje, msg_len);
+    //write(sock, mensaje, msg_len);
+    send(sock, &paquete, sizeof(paquete),0);
+    printf("Paquete enviado: mov=%d, x=%.2f, y=%.2f\n", paquete.movimiento, paquete.x, paquete.y);
+
 
     // C) Leer respuesta
-    uint32_t resp_len;
-    read(sock, &resp_len, sizeof(resp_len)); // Lee los primeros 4 bytes (tamaño del mensaje de respuesta).
-    resp_len = ntohl(resp_len); // netword to host long: convertir a formato local 
+    //uint32_t resp_len;
+    //read(sock, &resp_len, sizeof(resp_len)); // Lee los primeros 4 bytes (tamaño del mensaje de respuesta).
+    //resp_len = ntohl(resp_len); // netword to host long: convertir a formato local 
 
-    char *buffer = malloc(resp_len + 1); // Reserva memoria para la respuesta.
-    read(sock, buffer, resp_len); // Lee exactamente resp_len bytes.
-    buffer[resp_len] = '\0'; // terminar string
+    //char *buffer = malloc(resp_len + 1); // Reserva memoria para la respuesta.
+    //read(sock, buffer, resp_len); // Lee exactamente resp_len bytes.
+    //buffer[resp_len] = '\0'; // terminar string
+    //printf("Respuesta del servidor: %s\n", buffer);
 
-    printf("Respuesta del servidor: %s\n", buffer);
+    // Esperar una respuesta (del mismo tamaño)
+    struct Paquete resp;
+    int n = recv(sock, &resp, sizeof(resp), 0);
+    if (n > 0) {
+        printf("Respuesta recibida: mov=%d, x=%.2f, y=%.2f\n", resp.movimiento, resp.x, resp.y);
+    }
 
     // =======================================
     // PASO 4: Cerrar la comunicación
     // libera memoria y cierra la conexion
     // =======================================
 
-    free(buffer);
     close(sock); 
     return 0;
 }
