@@ -7,7 +7,10 @@ ifeq ($(UNAME_S),Darwin) # macOS
     LDFLAGS = -L/opt/homebrew/lib -lraylib -framework OpenGL -framework Cocoa -framework IOKit -framework CoreVideo
 else # Linux
     CFLAGS = -Wall -Wextra -std=c11 -I/usr/include
-    LDFLAGS = -L/usr/lib -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
+
+    LDFLAGS = -L/usr/local/lib -lraylib -lGL -lm -lpthread -ldl -lrt -lX11 # Amanda
+	
+	LDFLAGS = -L/usr/lib -lraylib -lGL -lm -lpthread -ldl -lrt -lX11 # Jafet
 endif
 
 # Compilador
