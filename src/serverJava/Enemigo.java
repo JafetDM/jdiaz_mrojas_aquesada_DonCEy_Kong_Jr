@@ -1,4 +1,4 @@
-package src.serverJava;
+package serverJava;
 // Enemigo.java
 
 public abstract class Enemigo implements ElementoJuego {

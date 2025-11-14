@@ -1,4 +1,4 @@
-package src.serverJava;
+package serverJava;
 public interface Publisher {
     void addSubscriber(Subscriber suscriptor);
     void removeSubscriber(Subscriber suscriptor);

@@ -1,5 +1,5 @@
 
-package src.serverJava;
+package serverJava;
 
 /**
  * Interfaz Subscriber (Observer)
