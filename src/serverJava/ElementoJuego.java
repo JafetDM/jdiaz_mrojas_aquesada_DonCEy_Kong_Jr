@@ -1,4 +1,4 @@
-package serverJava;
+package src.serverJava;
 // Cualquier cosa que exista en el mundo del juego
 public interface ElementoJuego {
     int getId();

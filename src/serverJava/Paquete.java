@@ -1,4 +1,4 @@
-package serverJava;
+package src.serverJava;
 public class Paquete {
     public String player;
     public float x;

@@ -1,4 +1,4 @@
-package serverJava;
+package src.serverJava;
 // GestorJuego.java
 import java.util.ArrayList;
 import java.util.Iterator;

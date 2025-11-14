@@ -1,4 +1,4 @@
-package serverJava;
+package src.serverJava;
 // Fruta.java
 
 public class Fruta implements ElementoJuego {

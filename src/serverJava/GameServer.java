@@ -1,4 +1,4 @@
-package serverJava;
+package src.serverJava;
 import java.io.*;
 import java.net.*;
 import java.util.*;

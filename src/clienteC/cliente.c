@@ -21,10 +21,15 @@
 typedef struct {
     float x, y;
     int vida;
+    int id;
+    int vector; // 0, 1, 2
+    bool salto;
+    int liana; // 0, 1, 2
 } Player;
 
 typedef struct {
     float x, y;
+    int vector; // 1 a 4
     int tipo;
     int estado;
 } Enemy;
@@ -296,6 +301,7 @@ static void render_game_locked(GameState *s, Texture2D playerTex, Texture2D stag
 
     EndDrawing();
 }
+
 int main() {
     // init GameState
     memset(&g_state, 0, sizeof(GameState));
