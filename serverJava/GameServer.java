@@ -1,9 +1,15 @@
+package serverJava;
 import java.io.*;
 import java.net.*;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 // Clase principal que inicia el servidor
+
+// ============
+// Publisher
+// ============
+
 public class GameServer {
 
     // Puerto
@@ -73,12 +79,24 @@ public class GameServer {
         gameThread.start();
     }
 
+
+    public void processPlayerInput(ClientHandler sender, Paquete paquete) {
+
+    // Aquí puedes aplicar lógica del juego si quieres:
+    // mover jugador, validar posiciones, colisiones, etc.
+    
+    // Por ahora solo retransmitimos a todos
+    sendAll(paquete);
+}
+
     // Enviar un mensaje a todos los clientes (lo que ya tenías)
     public void sendAll(Paquete paquete) {
+        String json = paquete.toJson();
         for (ClientHandler client : clients) {
-            client.sendPacket(paquete);
+            client.sendJson(json);
         }
     }
+
 
     // Eliminar un cliente si se desconecta
     public void removeClient(ClientHandler client) {

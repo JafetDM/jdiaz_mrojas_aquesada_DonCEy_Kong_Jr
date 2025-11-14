@@ -1,7 +1,8 @@
+package serverJava;
 import java.io.*;
 import java.net.*;
 
-public class ClientHandler implements Runnable { 
+public class ClientHandler implements Runnable, Subscriber { 
     // implements para intefaz de una clase 
     // utilizar la interfaz Runnable para el metodo run
     // Thread utiliza un Runnable target, por lo que run debe tener esta interfaz
@@ -37,26 +38,44 @@ public class ClientHandler implements Runnable {
         return playerName;
     }
 
+    @Override
+    public void update(Paquete state) {
+        // Enviar el estado actualizado al cliente
+        try {
+            out.writeUTF(state.toJson());
+            out.flush();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+
     @Override // redefine run con la base de la misma interfaz que Runnable
     public void run() {
         try{
             while(true){
             // ===============================================
-            // PASO 4: Leer y escribir datos (binarios) del y al cliente
+            // PASO 4: Leer y escribir datos (JSON) del y al cliente
             // ===============================================
 
-            int movimiento = in.readInt();
-            float x = in.readFloat();
-            float y = in.readFloat();
+            String jsonInput = in.readUTF();
 
-            System.out.println("Jugador " + playerName + ": movimiento=" + movimiento + " x=" + x + " y=" + y);
+            // Convertir JSON a objeto paquete
+
+            Paquete paquete = Paquete.fromJson(jsonInput);
+
+            System.out.println("Jugador " + playerName + 
+                                ": movimiento=" + paquete.movimiento +
+                                " x=" + paquete.x + " y=" + paquete.y);
 
 
             // Crear paquete y reenviarlo a todos
-            Paquete paquete = new Paquete(playerName, x, y, movimiento);
-            sendPacket(paquete);
+            server.processPlayerInput(this, paquete);
+
             System.out.println("Paquete enviado al cliente.");
         }
+
+        // excepcion si cliente se desconecta
         
 
         } catch (IOException e) {
@@ -79,12 +98,10 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    // Enviar paquete binario
+    // Enviar paquete JSON
     public void sendPacket(Paquete paquete) {
         try {
-            out.writeFloat(paquete.x);
-            out.writeFloat(paquete.y);
-            out.writeInt(paquete.movimiento);
+            out.writeUTF(paquete.toJson());
             out.flush();
         } catch (IOException e) {
             e.printStackTrace();
@@ -102,6 +119,17 @@ public class ClientHandler implements Runnable {
             return "Servidor: recibí tu mensaje -> " + msg;
         }
     }
+
+    // Metodo para enviar JSON
+    public void sendJson(String json) {
+    try {
+        out.writeUTF(json);
+        out.flush();
+    } catch (IOException e) {
+        e.printStackTrace();
+    }
+}
+
 }
 
 

@@ -1,3 +1,4 @@
+package serverJava;
 // GestorJuego.java
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -5,6 +6,8 @@ import java.util.List;
 
 public class GestorJuego {
 
+    private List<Subscriber> subscribers = new ArrayList<>();
+    private Paquete currentState;
     // ===== fábrica =====
     public interface FabricaObjetos {
         Enemigo crearEnemigo(String tipo, float x, float y);

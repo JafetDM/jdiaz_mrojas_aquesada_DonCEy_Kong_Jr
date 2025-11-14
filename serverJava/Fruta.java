@@ -1,4 +1,6 @@
+package serverJava;
 // Fruta.java
+
 public class Fruta implements ElementoJuego {
 
     private static int SIGUIENTE_ID = 1000;

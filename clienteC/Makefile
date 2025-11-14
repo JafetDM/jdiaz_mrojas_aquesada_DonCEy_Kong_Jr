@@ -18,22 +18,17 @@ CC = clang
 
 # Archivos fuente
 CLIENT_SRC = cliente.c
-SERVER_SRC = server.c
 GUI_SRC = gui_raylib.c
 
 # Ejecutables
 CLIENT_BIN = cliente
-SERVER_BIN = server
 GUI_BIN = gui_raylib
 
 # Reglas
-all: $(CLIENT_BIN) $(SERVER_BIN) $(GUI_BIN)
+all: $(CLIENT_BIN) $(GUI_BIN)
 
 $(CLIENT_BIN): $(CLIENT_SRC)
 	$(CC) $(CFLAGS) $(CLIENT_SRC) -o $(CLIENT_BIN)
-
-$(SERVER_BIN): $(SERVER_SRC)
-	$(CC) $(CFLAGS) $(SERVER_SRC) -o $(SERVER_BIN)
 
 $(GUI_BIN): $(GUI_SRC)
 	$(CC) $(CFLAGS) $(GUI_SRC) -o $(GUI_BIN) $(LDFLAGS)
@@ -42,4 +37,4 @@ run_test: $(GUI_BIN)
 	./$(GUI_BIN)
 
 clean:
-	rm -f $(CLIENT_BIN) $(SERVER_BIN) $(GUI_BIN)
+	rm -f $(CLIENT_BIN) $(GUI_BIN)

@@ -1,4 +1,6 @@
+package serverJava;
 // Enemigo.java
+
 public abstract class Enemigo implements ElementoJuego {
 
     protected static int SIGUIENTE_ID = 1;
