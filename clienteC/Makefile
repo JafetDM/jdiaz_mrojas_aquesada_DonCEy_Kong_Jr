@@ -1,40 +1,45 @@
-# Detecta el sistema operativo
+# ================================
+# Detectar sistema operativo
+# ================================
 UNAME_S := $(shell uname -s)
 
-# Configura rutas según el sistema
-ifeq ($(UNAME_S),Darwin) # macOS
-    CFLAGS = -Wall -Wextra -std=c11 -I/opt/homebrew/include
-    LDFLAGS = -L/opt/homebrew/lib -lraylib -framework OpenGL -framework Cocoa -framework IOKit -framework CoreVideo
-else # Linux
-    CFLAGS = -Wall -Wextra -std=c11 -I/usr/include
+# ================================
+# Flags para compilación
+# ================================
+CFLAGS = -Wall -Wextra -std=c11
 
-    LDFLAGS = -L/usr/local/lib -lraylib -lGL -lm -lpthread -ldl -lrt -lX11 # Amanda
-	
-	LDFLAGS = -L/usr/lib -lraylib -lGL -lm -lpthread -ldl -lrt -lX11 # Jafet
+ifeq ($(UNAME_S),Darwin)
+    # ---------- macOS ----------
+    CFLAGS += -I/opt/homebrew/include
+    LDFLAGS = -L/opt/homebrew/lib -lraylib -framework OpenGL -framework Cocoa -framework IOKit -framework CoreVideo
+else
+    # ---------- Linux ----------
+    CFLAGS += -I/usr/include
+    LDFLAGS = -L/usr/local/lib -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
 endif
 
+# ================================
 # Compilador
+# ================================
 CC = clang
 
+# ================================
 # Archivos fuente
-CLIENT_SRC = cliente.c
-GUI_SRC = gui_raylib.c
+# ================================
+SRC = cliente.c cJSON.c
+BIN = cliente
 
-# Ejecutables
-CLIENT_BIN = cliente
-GUI_BIN = gui_raylib
+# ================================
+# Reglas principales
+# ================================
+all: $(BIN)
 
-# Reglas
-all: $(CLIENT_BIN) $(GUI_BIN)
+$(BIN): $(SRC)
+	$(CC) $(CFLAGS) $(SRC) -o $(BIN) $(LDFLAGS)
 
-$(CLIENT_BIN): $(CLIENT_SRC)
-	$(CC) $(CFLAGS) $(CLIENT_SRC) -o $(CLIENT_BIN)
-
-$(GUI_BIN): $(GUI_SRC)
-	$(CC) $(CFLAGS) $(GUI_SRC) -o $(GUI_BIN) $(LDFLAGS)
-
-run_test: $(GUI_BIN)
-	./$(GUI_BIN)
+run:
+	./$(BIN)
 
 clean:
-	rm -f $(CLIENT_BIN) $(GUI_BIN)
+	rm -f $(BIN)
+

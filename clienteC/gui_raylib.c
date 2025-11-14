@@ -1,82 +1,75 @@
 #include "raylib.h"
+#include "game_state.h"
 
-#define TILE_SIZE 32
-#define MAP_WIDTH 10
-#define MAP_HEIGHT 8
+#define SCREEN_WIDTH 800
+#define SCREEN_HEIGHT 600
 
+// =============================
+// Función que pinta el juego
+// =============================
+void render_game(GameState *state, Texture2D player, Texture2D stage) {
 
-int main(void) {
-    const int screenWidth = 800;
-    const int screenHeight = 600;
+    BeginDrawing();
+    ClearBackground(BLACK);
 
-    InitWindow(screenWidth, screenHeight, "Donkey Kong Jr Stage");
-    SetTargetFPS(60);
+    // Dibujar fondo
+    Rectangle srcStage = {0, 0, (float)stage.width, (float)stage.height};
+    Rectangle dstStage = {0, 0, SCREEN_WIDTH, SCREEN_HEIGHT};
+    DrawTexturePro(stage, srcStage, dstStage, (Vector2){0,0}, 0, WHITE);
 
-    // Cargar textura (sprite)
-    Texture2D player = LoadTexture("assets/dk.jpg");
+    // Dibujar jugador
+    DrawCircle(state->jugador.x, state->jugador.y, 12, BLUE);
 
-    // Carga la textura del stage (el fondo)
-    Texture2D stage = LoadTexture("assets/stage.png");
-
-    // ======================================
-    // Rectangulos y vector para el stage fondo
-    // ======================================
-    // Rectangulo fuente (para dibujarlo)
-    Rectangle source = {0, 0, (float)stage.width, (float)stage.height};
-    // Rectangulo destino (tamaño en pantalla)
-    Rectangle dest = {0, 0, (float)screenWidth, (float)screenHeight}; 
-    // Esta en 0,0
-    Vector2 origin = {0,0};
-
-    // ======================================
-    // Rectangulos y vector para DK jr
-    // ======================================
-
-    // Rectangulo fuente (para dibujarlo)
-    Rectangle source_dk = {0, 0, (float)player.width, (float)player.height};
-    // tamaño deseado
-    float playerSize = 50.0f;
-    // Posición inicial
-    Vector2 playerPos = { 100, 500 };
-
-    while (!WindowShouldClose()) {
-        // Movimiento simple (opcional)
-        if (IsKeyDown(KEY_RIGHT)) playerPos.x += 2;
-        if (IsKeyDown(KEY_LEFT))  playerPos.x -= 2;
-
-        BeginDrawing();
-            ClearBackground(BLACK);
-
-            // Dibuja el fondo
-            DrawTexturePro(stage, source, dest, origin, 0.0f, WHITE);
-
-            // Crear el rectángulo destino dinámico (en cada bucle) según la posición
-            Rectangle dest_dk = { playerPos.x, playerPos.y, playerSize, playerSize };
-
-            // Dibujar sprite en posición específica
-            DrawTexturePro(player, source_dk, dest_dk, (Vector2){0,0}, 0.0f, WHITE);
-            
-            // Dibujar cuadricula
-            int tileSize = 32;
-            int cols = screenWidth / tileSize;
-            int rows = screenHeight / tileSize;
-
-            for (int i = 0; i <= cols; i++) {
-                DrawLine(i * tileSize, 0, i * tileSize, screenHeight, Fade(GREEN, 0.3f));
-            }
-            for (int j = 0; j <= rows; j++) {
-                DrawLine(0, j * tileSize, screenWidth, j * tileSize, Fade(GREEN, 0.3f));
-            }
-
-
-        EndDrawing();
+    // Dibujar enemigos
+    for (int i = 0; i < state->totalEnemigos; i++) {
+        DrawCircle(state->enemigos[i].x, state->enemigos[i].y, 10, RED);
     }
 
-    // Liberar textura
+    // Dibujar frutas
+    for (int i = 0; i < state->totalFrutas; i++) {
+        DrawCircle(state->frutas[i].x, state->frutas[i].y, 8, GREEN);
+    }
+
+    // Dibujar grid
+    for (int x = 0; x < SCREEN_WIDTH; x += 32)
+        DrawLine(x, 0, x, SCREEN_HEIGHT, Fade(GREEN, 0.3f));
+
+    for (int y = 0; y < SCREEN_HEIGHT; y += 32)
+        DrawLine(0, y, SCREEN_WIDTH, y, Fade(GREEN, 0.3f));
+
+    EndDrawing();
+}
+
+
+// =============================
+// main()
+// =============================
+int main(void) {
+
+    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Juego con JSON");
+    SetTargetFPS(60);
+
+    Texture2D player = LoadTexture("assets/dk.jpg");
+    Texture2D stage  = LoadTexture("assets/stage.png");
+
+    // Estado inicial vacío
+    GameState state = {0};
+
+    // DEBUG: posición inicial (será reemplazado por JSON real)
+    state.jugador.x = 100;
+    state.jugador.y = 500;
+
+    // Bucle principal
+    while (!WindowShouldClose()) {
+
+        // Aquí NO se recibe JSON
+        // El cliente.c debe actualizar la variable "state"
+
+        render_game(&state, player, stage);
+    }
+
     UnloadTexture(player);
     UnloadTexture(stage);
-
     CloseWindow();
-
     return 0;
 }
