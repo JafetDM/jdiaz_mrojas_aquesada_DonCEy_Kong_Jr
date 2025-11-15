@@ -2,14 +2,18 @@ package serverJava;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonSyntaxException;
 
 /**
- * Clase Paquete para serializar/deserializar datos del juego
+ * Clase Paquete para serializar/deserializar datos del juego con Gson
  * Representa un mensaje entre cliente y servidor
  */
 public class Paquete {
-    // Gson estático para toda la aplicación
-    private static final Gson gson = new GsonBuilder().setPrettyPrinting().create();
+    // Gson estático para toda la aplicación (thread-safe y reutilizable)
+    private static final Gson gson = new GsonBuilder()
+        .serializeNulls()              // Incluir campos null en JSON
+        .setPrettyPrinting()           // JSON formateado (legible)
+        .create();
     
     // Campos del paquete
     public String tipo;           // "MOVIMIENTO", "CREAR_ENEMIGO", "CREAR_FRUTA", "ESTADO_JUEGO", etc.
@@ -43,23 +47,39 @@ public class Paquete {
     }
     
     /**
-     * Convierte el paquete a JSON
+     * Convierte el paquete a JSON usando Gson
      * @return String con el JSON del paquete
      */
     public String toJson() {
-        return gson.toJson(this);
+        try {
+            return gson.toJson(this);
+        } catch (Exception e) {
+            System.err.println("Error al serializar a JSON: " + e.getMessage());
+            e.printStackTrace();
+            return "{}"; // JSON vacío en caso de error
+        }
     }
     
     /**
-     * Crea un Paquete desde un String JSON
+     * Crea un Paquete desde un String JSON usando Gson
      * @param json String con el JSON
-     * @return Paquete deserializado
+     * @return Paquete deserializado o null si hay error
      */
     public static Paquete fromJson(String json) {
+        if (json == null || json.trim().isEmpty()) {
+            System.err.println("JSON vacío o null");
+            return null;
+        }
+        
         try {
             return gson.fromJson(json, Paquete.class);
+        } catch (JsonSyntaxException e) {
+            System.err.println("Error de sintaxis en JSON: " + e.getMessage());
+            System.err.println("JSON recibido: " + json);
+            return null;
         } catch (Exception e) {
             System.err.println("Error al deserializar JSON: " + e.getMessage());
+            e.printStackTrace();
             return null;
         }
     }
