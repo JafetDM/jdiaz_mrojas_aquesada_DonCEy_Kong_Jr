@@ -251,6 +251,89 @@ static void parse_game_state_json(const char *jsonText) {
     
     // TODO: Parsear enemigos y frutas si el servidor los envía
     // (Por ahora el GameState solo tiene jugadores)
+
+    // Enemigos
+    cJSON *enemigos = cJSON_GetObjectItem(root, "enemigos");
+    if (enemigos && cJSON_IsArray(enemigos)) {
+        int count = cJSON_GetArraySize(enemigos);
+
+        ensure_enemy_capacity(&g_state, count);
+        g_state.totalEnemigos = 0;
+
+        for (int i = 0; i < count; i++) {
+            cJSON *e = cJSON_GetArrayItem(enemigos, i);
+            if (!e || !cJSON_IsObject(e)) continue;
+
+            cJSON *id     = cJSON_GetObjectItem(e, "id");
+            cJSON *tipo   = cJSON_GetObjectItem(e, "tipo");
+            cJSON *x      = cJSON_GetObjectItem(e, "x");
+            cJSON *y      = cJSON_GetObjectItem(e, "y");
+            cJSON *vel    = cJSON_GetObjectItem(e, "velocidad");
+
+            Enemy *dst = &g_state.enemigos[g_state.totalEnemigos++];
+            memset(dst, 0, sizeof(Enemy));
+
+            if (id && cJSON_IsNumber(id)) {
+                snprintf(dst->id, sizeof(dst->id), "%d", (int)id->valuedouble);
+            } else {
+                strcpy(dst->id, "");
+            }
+
+            if (tipo && cJSON_IsString(tipo)) {
+                strncpy(dst->tipo, tipo->valuestring, sizeof(dst->tipo) - 1);
+            }
+
+            dst->x = x ? (float)x->valuedouble : 0.0f;
+            dst->y = y ? (float)y->valuedouble : 0.0f;
+            dst->velocidad = vel ? (float)vel->valuedouble : 0.0f;
+
+            // Por ahora no mandamos dirección desde el servidor
+            strcpy(dst->direccion, "");
+        }
+
+        // printf("[STATE] Enemigos: %d\n", g_state.totalEnemigos);
+    }
+
+    // Frutas
+    cJSON *frutas = cJSON_GetObjectItem(root, "frutas");
+    if (frutas && cJSON_IsArray(frutas)) {
+        int count = cJSON_GetArraySize(frutas);
+
+        ensure_fruit_capacity(&g_state, count);
+        g_state.totalFrutas = 0;
+
+        for (int i = 0; i < count; i++) {
+            cJSON *f = cJSON_GetArrayItem(frutas, i);
+            if (!f || !cJSON_IsObject(f)) continue;
+
+            cJSON *id        = cJSON_GetObjectItem(f, "id");
+            cJSON *x         = cJSON_GetObjectItem(f, "x");
+            cJSON *y         = cJSON_GetObjectItem(f, "y");
+            cJSON *puntos    = cJSON_GetObjectItem(f, "puntos");
+            cJSON *recolecta = cJSON_GetObjectItem(f, "recolectada");
+
+            Fruit *dst = &g_state.frutas[g_state.totalFrutas++];
+            memset(dst, 0, sizeof(Fruit));
+
+            if (id && cJSON_IsNumber(id)) {
+                snprintf(dst->id, sizeof(dst->id), "%d", (int)id->valuedouble);
+            } else {
+                strcpy(dst->id, "");
+            }
+
+            dst->x = x ? (float)x->valuedouble : 0.0f;
+            dst->y = y ? (float)y->valuedouble : 0.0f;
+            dst->puntos = puntos ? puntos->valueint : 0;
+
+            if (recolecta && cJSON_IsBool(recolecta)) {
+                dst->recolectada = cJSON_IsTrue(recolecta);
+            } else {
+                dst->recolectada = false;
+            }
+        }
+
+        // printf("[STATE] Frutas: %d\n", g_state.totalFrutas);
+    }
     
     pthread_mutex_unlock(&g_state.mutex);
     cJSON_Delete(root);
@@ -272,6 +355,15 @@ static int send_paquete(const char *tipo, const char *movimiento, float x, float
     cJSON_AddNumberToObject(paquete, "x", x);
     cJSON_AddNumberToObject(paquete, "y", y);
     cJSON_AddNumberToObject(paquete, "timestamp", (double)time(NULL) * 1000);
+
+    // Campos especiales según el tipo de paquete
+    if (strcmp(tipo, "CREAR_ENEMIGO") == 0) {
+        // Por ahora siempre creamos cocodrilo rojo
+        cJSON_AddStringToObject(paquete, "enemyTipo", "CROC_RED");
+    } else if (strcmp(tipo, "CREAR_FRUTA") == 0) {
+        // Puntos fijos de ejemplo
+        cJSON_AddNumberToObject(paquete, "puntos", 50);
+    }
     
     char *jsonStr = cJSON_PrintUnformatted(paquete);
     if (!jsonStr) {

@@ -2,6 +2,8 @@ package serverJava;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.List;
+import java.util.ArrayList;
 
 /**
  * GameState - Estado simple de un juego
@@ -14,6 +16,10 @@ public class GameState {
     
     // Map con los datos de cada jugador: playerName -> Paquete con (x, y)
     private Map<String, Paquete> jugadores;
+
+    //Enemigos y frutas
+    private List<EnemyState> enemigos;
+    private List<FruitState> frutas;
     
     // Timestamp de última actualización
     private long timestamp;
@@ -24,6 +30,8 @@ public class GameState {
     public GameState(Evento evento) {
         this.evento = evento;
         this.jugadores = new HashMap<>();
+        this.enemigos = new ArrayList<>();
+        this.frutas = new ArrayList<>();
         this.timestamp = System.currentTimeMillis();
     }
     
@@ -57,7 +65,61 @@ public class GameState {
     public Map<String, Paquete> obtenerJugadores() {
         return new HashMap<>(jugadores); // Copia defensiva
     }
+
+    // Clases internas para enemigos y frutas
+    public static class EnemyState {
+        public int id;
+        public String tipo;
+        public float x;
+        public float y;
+        public float velocidad;
+    }
+
+    public static class FruitState {
+        public int id;
+        public float x;
+        public float y;
+        public int puntos;
+        public boolean recolectada;
+    }
     
+    // Actualiza la lista de enemigos y frutas
+    public void actualizarEnemigosYFrutas(List<ElementoJuego> elementos) {
+        enemigos.clear();
+        frutas.clear();
+
+        if (elementos == null) return;
+
+        for (ElementoJuego e : elementos) {
+            if (e instanceof Enemigo) {
+                Enemigo en = (Enemigo) e;
+
+                EnemyState es = new EnemyState();
+                es.id = en.getId();
+                es.tipo = en.getTipo();
+                es.x = en.getX();
+                es.y = en.getY();
+                es.velocidad = en.velocidad; // protegido, pero mismo paquete
+
+                enemigos.add(es);
+
+            } else if (e instanceof Fruta) {
+                Fruta fr = (Fruta) e;
+
+                FruitState fs = new FruitState();
+                fs.id = fr.getId();
+                fs.x = fr.getX();
+                fs.y = fr.getY();
+                fs.puntos = fr.getPuntos();
+                fs.recolectada = false; // por ahora siempre false
+
+                frutas.add(fs);
+            }
+        }
+
+        this.timestamp = System.currentTimeMillis();
+    }
+
     /**
      * Convierte el GameState a JSON usando Gson
      */
@@ -89,7 +151,15 @@ public class GameState {
     public int getCantidadJugadores() {
         return jugadores.size();
     }
-    
+
+    public List<EnemyState> getEnemigos() { 
+        return enemigos; 
+    }
+
+    public List<FruitState> getFrutas() { 
+        return frutas; 
+    }
+
     @Override
     public String toString() {
         return "GameState{" +

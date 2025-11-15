@@ -167,11 +167,18 @@ public class GameServer {
         System.out.println("[*] Game loop iniciado a 60 FPS");
     }
     
-    /**
-     * Hace broadcast del estado de todos los juegos
-     */
+    // Envía el estado del juego a todos los suscriptores de cada evento
     private void broadcastGameStates() {
+        // Obtener snapshot global de elementos
+        List<ElementoJuego> elementos = gestor.obtenerElementos();
+
         for (EventPublisher publisher : publishers.values()) {
+            GameState gameState = publisher.getGameState();
+
+            // Actualizar enemigos y frutas dentro del GameState
+            gameState.actualizarEnemigosYFrutas(elementos);
+
+            // Enviar ESTADO_JUEGO a los suscriptores de este evento
             publisher.broadcastGameState();
         }
     }
