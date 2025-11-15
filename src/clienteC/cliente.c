@@ -21,6 +21,7 @@ typedef struct {
     char playerName[64];
     float x, y;
     int vida;
+    int puntos;
 } Player;
 
 typedef struct {
@@ -236,13 +237,19 @@ static void parse_game_state_json(const char *jsonText) {
             // Obtener datos del Paquete
             cJSON *x = cJSON_GetObjectItem(jugador, "x");
             cJSON *y = cJSON_GetObjectItem(jugador, "y");
+            cJSON *vida   = cJSON_GetObjectItem(jugador, "vida");
+            cJSON *puntos = cJSON_GetObjectItem(jugador, "puntos");
             
             if (x && y) {
                 Player *p = &g_state.jugadores[g_state.totalJugadores++];
+                memset(p, 0, sizeof(Player));
+                
                 strncpy(p->playerName, name, sizeof(p->playerName) - 1);
                 p->x = (float)x->valuedouble;
                 p->y = (float)y->valuedouble;
-                p->vida = 3; // default
+                
+                p->vida   = (vida   && cJSON_IsNumber(vida))   ? vida->valueint   : 3;
+                p->puntos = (puntos && cJSON_IsNumber(puntos)) ? puntos->valueint : 0;
             }
         }
         
@@ -542,6 +549,19 @@ static void render_game(Texture2D stageTex) {
             DrawCircle((int)g_state.frutas[i].x, (int)g_state.frutas[i].y, 8, YELLOW);
         }
     }
+
+    // Obtener vidas y puntos de mi jugador
+    int vidaLocal = -1;
+    int puntosLocal = 0;
+
+    for (int i = 0; i < g_state.totalJugadores; i++) {
+        Player *p = &g_state.jugadores[i];
+        if (strcmp(p->playerName, g_playerName) == 0) {
+            vidaLocal = p->vida;
+            puntosLocal = p->puntos;
+            break;
+        }
+    }
     
     pthread_mutex_unlock(&g_state.mutex);
     
@@ -549,7 +569,11 @@ static void render_game(Texture2D stageTex) {
     DrawText(TextFormat("Evento: %s", g_eventoAsignado), 10, 10, 20, DARKGREEN);
     DrawText(TextFormat("Jugadores: %d", g_state.totalJugadores), 10, 35, 20, DARKGREEN);
     DrawText("Flechas: Mover | E: Enemigo | F: Fruta", 10, SCREEN_HEIGHT - 25, 15, DARKGRAY);
-    
+    DrawText(TextFormat("Vidas: %d", (vidaLocal >= 0 ? vidaLocal : 0)),
+             10, 60, 20, RED);
+    DrawText(TextFormat("Puntos: %d", puntosLocal),
+             10, 85, 20, GOLD);
+             
     // Grid
     for (int x = 0; x < SCREEN_WIDTH; x += 32)
         DrawLine(x, 0, x, SCREEN_HEIGHT, Fade(GREEN, 0.15f));

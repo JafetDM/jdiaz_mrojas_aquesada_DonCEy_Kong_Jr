@@ -15,7 +15,7 @@ public class GameState {
     private Evento evento;
     
     // Map con los datos de cada jugador: playerName -> Paquete con (x, y)
-    private Map<String, Paquete> jugadores;
+    private Map<String, PlayerState> jugadores;
 
     //Enemigos y frutas
     private List<EnemyState> enemigos;
@@ -39,15 +39,25 @@ public class GameState {
      * Actualiza la posición de un jugador
      */
     public void actualizarJugador(String playerName, float x, float y) {
-        Paquete datos = new Paquete("POSICION", playerName, x, y);
-        jugadores.put(playerName, datos);
+        PlayerState p = jugadores.get(playerName);
+        if (p == null) {
+            p = new PlayerState();
+            p.playerName = playerName;
+            p.vida = 3;     // vidas iniciales
+            p.puntos = 0;   // puntos iniciales
+            jugadores.put(playerName, p);
+        }
+
+        p.x = x;
+        p.y = y;
+
         this.timestamp = System.currentTimeMillis();
     }
     
     /**
      * Obtiene los datos de un jugador
      */
-    public Paquete obtenerJugador(String playerName) {
+    public PlayerState obtenerJugador(String playerName) {
         return jugadores.get(playerName);
     }
     
@@ -62,8 +72,17 @@ public class GameState {
     /**
      * Obtiene todos los jugadores
      */
-    public Map<String, Paquete> obtenerJugadores() {
-        return new HashMap<>(jugadores); // Copia defensiva
+    public Map<String, PlayerState> obtenerJugadores() {
+        return new HashMap<>(jugadores); // copia defensiva
+    }
+
+    // Clase interna para el estado de un jugador
+    public static class PlayerState {
+        public String playerName;
+        public float x;
+        public float y;
+        public int vida;
+        public int puntos;
     }
 
     // Clases internas para enemigos y frutas

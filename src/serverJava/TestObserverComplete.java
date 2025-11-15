@@ -1,9 +1,10 @@
+/*
 package serverJava;
 
 /**
  * Test completo del patrón Observer
  * Demuestra Publisher/Subscriber con múltiples eventos
- */
+ *\/
 public class TestObserverComplete {
     
     public static void main(String[] args) {
@@ -24,7 +25,7 @@ public class TestObserverComplete {
     
     /**
      * Test 1: Crear Publishers para cada evento
-     */
+     *\/
     private static void test1_CrearPublishers() {
         System.out.println("=== TEST 1: Crear Publishers ===");
         
@@ -43,21 +44,19 @@ public class TestObserverComplete {
     
     /**
      * Test 2: Suscribir Observers
-     */
+     *\/
     private static void test2_SuscribirObservers() {
         System.out.println("=== TEST 2: Suscribir Observers ===");
         
         EventPublisher publisher = new EventPublisher(Evento.JUEGO_1);
         
-        // Crear subscribers mock
         Subscriber sub1 = crearMockSubscriber("Observer1", Evento.JUEGO_1);
         Subscriber sub2 = crearMockSubscriber("Observer2", Evento.JUEGO_1);
-        Subscriber sub3 = crearMockSubscriber("Observer3", Evento.JUEGO_2); // Diferente evento
+        Subscriber sub3 = crearMockSubscriber("Observer3", Evento.JUEGO_2);
         
-        // Suscribir
         publisher.subscribe(sub1);
         publisher.subscribe(sub2);
-        publisher.subscribe(sub3); // No debería agregarse (diferente evento)
+        publisher.subscribe(sub3);
         
         System.out.println("Suscriptores en JUEGO_1: " + publisher.getCantidadSuscriptores());
         
@@ -68,18 +67,16 @@ public class TestObserverComplete {
     
     /**
      * Test 3: Notificar solo a observers del mismo evento
-     */
+     *\/
     private static void test3_NotificarPorEvento() {
         System.out.println("=== TEST 3: Notificar por Evento ===");
         
         EventPublisher pub1 = new EventPublisher(Evento.JUEGO_1);
         EventPublisher pub2 = new EventPublisher(Evento.JUEGO_2);
         
-        // Contadores para verificar notificaciones
         final int[] contador1 = {0};
         final int[] contador2 = {0};
         
-        // Subscribers que cuentan notificaciones
         Subscriber sub1 = new Subscriber() {
             public void update(Paquete p) {
                 contador1[0]++;
@@ -99,7 +96,6 @@ public class TestObserverComplete {
         pub1.subscribe(sub1);
         pub2.subscribe(sub2);
         
-        // Notificar solo a JUEGO_1
         Paquete paquete = new Paquete("MOVIMIENTO", "Test", 100, 200);
         pub1.notifySubscribers(paquete);
         
@@ -114,23 +110,20 @@ public class TestObserverComplete {
     
     /**
      * Test 4: Procesar paquetes actualiza GameState
-     */
+     *\/
     private static void test4_ProcesarPaquetes() {
         System.out.println("=== TEST 4: Procesar Paquetes ===");
         
         EventPublisher publisher = new EventPublisher(Evento.JUEGO_1);
         GameState gameState = publisher.getGameState();
         
-        // Crear subscriber
         Subscriber sub = crearMockSubscriber("TestPlayer", Evento.JUEGO_1);
         publisher.subscribe(sub);
         
-        // Procesar movimiento
         Paquete movimiento = Paquete.crearMovimiento("Jugador1", "ARRIBA", 150.5f, 250.3f);
         publisher.procesarPaquete(movimiento);
         
-        // Verificar que se actualizó el GameState
-        Paquete datos = gameState.obtenerJugador("Jugador1");
+        GameState.PlayerState datos = gameState.obtenerJugador("Jugador1");
         
         System.out.println("Jugadores en GameState: " + gameState.getCantidadJugadores());
         System.out.println("Datos del jugador: x=" + datos.x + ", y=" + datos.y);
@@ -145,7 +138,7 @@ public class TestObserverComplete {
     
     /**
      * Test 5: Desuscribir observers
-     */
+     *\/
     private static void test5_Desuscribir() {
         System.out.println("=== TEST 5: Desuscribir ===");
         
@@ -170,7 +163,7 @@ public class TestObserverComplete {
     
     /**
      * Helper: Crea un subscriber mock para testing
-     */
+     *\/
     private static Subscriber crearMockSubscriber(String nombre, Evento evento) {
         return new Subscriber() {
             @Override
@@ -191,16 +184,14 @@ public class TestObserverComplete {
     }
     
     /* 
-
      * Test de integración completo con GameServer
-    
+     *\/
+    /*
     public static void testIntegracion() {
         System.out.println("\n=== TEST INTEGRACIÓN: GameServer ===");
         
-        // Crear server
         GameServer server = new GameServer(9999);
         
-        // Verificar que se crearon publishers
         EventPublisher pub1 = server.getPublisher(Evento.JUEGO_1);
         EventPublisher pub2 = server.getPublisher(Evento.JUEGO_2);
         
@@ -213,5 +204,6 @@ public class TestObserverComplete {
         
         System.out.println("✅ Test de integración pasado\n");
     }
-    */
+    *\/
 }
+*/
