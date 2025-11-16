@@ -12,6 +12,7 @@
 #include "raylib.h"
 #include "librerias/cJSON.h"
 #include "config.h"
+#include "layout.h" 
 
 // ========================
 // Estructuras de estado
@@ -64,6 +65,8 @@ typedef struct {
 // ========================
 static void parse_game_state_json(const char *jsonText);
 static void parse_paquete_json(const char *jsonText);
+
+static bool g_showLayoutDebug = true;
 
 static GameState g_state;
 static int g_sock = -1;
@@ -488,6 +491,9 @@ static void send_input_from_keys(void) {
         movimiento = "ABAJO";
         moved = true;
     }
+    if (IsKeyPressed(KEY_L)) {
+        g_showLayoutDebug = !g_showLayoutDebug;
+    }
     
     // Limitar a pantalla
     if (player_x < 0) player_x = 0;
@@ -500,15 +506,6 @@ static void send_input_from_keys(void) {
         send_paquete("MOVIMIENTO", movimiento, player_x, player_y);
     }
     
-    // Tecla de prueba: crear enemigo
-    if (IsKeyPressed(KEY_E)) {
-        send_paquete("CREAR_ENEMIGO", NULL, 300, 400);
-    }
-    
-    // Tecla de prueba: crear fruta
-    if (IsKeyPressed(KEY_F)) {
-        send_paquete("CREAR_FRUTA", NULL, 200, 300);
-    }
 }
 
 // -------------------------
@@ -547,6 +544,32 @@ static void render_game(Texture2D stageTex) {
     for (int i = 0; i < g_state.totalFrutas; i++) {
         if (!g_state.frutas[i].recolectada) {
             DrawCircle((int)g_state.frutas[i].x, (int)g_state.frutas[i].y, 8, YELLOW);
+        }
+    }
+    
+    //Dibujar layout debug si está activado
+    if (g_showLayoutDebug) {
+        // Dibujar PLATAFORMAS como segmentos horizontales
+        for (int i = 0; i < NUM_PLATAFORMAS; i++) {
+            const PlataformaDef *p = &PLATAFORMAS[i];
+
+            DrawLine((int)p->xLeft, (int)p->y, (int)p->xRight, (int)p->y,
+                     Fade(RED, 0.7f));
+
+            // Etiqueta en el centro
+            float midX = (p->xLeft + p->xRight) * 0.5f;
+            DrawText(TextFormat("P%d", i), (int)midX - 10, (int)p->y - 15, 14, RED);
+        }
+
+        // Dibujar LIANAS como segmentos verticales
+        for (int j = 0; j < NUM_LIANAS; j++) {
+            const LianaDef *l = &LIANAS[j];
+
+            DrawLine((int)l->x, (int)l->yTop, (int)l->x, (int)l->yBottom,
+                     Fade(BLUE, 0.7f));
+
+            // Etiqueta en la parte de arriba
+            DrawText(TextFormat("L%d", j), (int)l->x - 10, (int)l->yTop - 20, 14, BLUE);
         }
     }
 

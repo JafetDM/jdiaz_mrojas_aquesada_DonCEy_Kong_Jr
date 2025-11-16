@@ -65,8 +65,8 @@ public class EventPublisher implements Publisher {
             return;
         }
         
-        System.out.println("[NOTIFY] " + evento + " -> " + subscribers.size() + 
-                         " suscriptores (" + paquete.tipo + ")");
+        //System.out.println("[NOTIFY] " + evento + " -> " + subscribers.size() + 
+                         //" suscriptores (" + paquete.tipo + ")");
         
         for (Subscriber subscriber : subscribers) {
             try {

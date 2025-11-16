@@ -112,3 +112,9 @@ else
 	sudo apt install -y libraylib-dev build-essential
 endif
 	@echo "✓ Dependencias instaladas"
+
+
+editor: coord_editor.c
+	@echo "Compilando editor de coordenadas..."
+	$(CC) $(CFLAGS) coord_editor.c -o editor $(LDFLAGS)
+	@echo "✓ Editor compilado como ./editor"

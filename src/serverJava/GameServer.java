@@ -92,6 +92,9 @@ public class GameServer {
         
         // Iniciar el bucle del juego
         startGameLoop();
+
+        // Iniciar consola de administración
+        startAdminConsole();
         
         try (ServerSocket serverSocket = new ServerSocket(port)) {
             int playerCount = 0;
@@ -318,6 +321,220 @@ public class GameServer {
     public List<ElementoJuego> obtenerElementos() {
         return gestor.obtenerElementos();
     }
+
+    // =============== MÉTODOS DEL ADMIN ===============
+
+    /**
+     * Crear enemigo desde la consola del admin.
+     * Recibe el evento, el tipo de enemigo y la ubicación lógica.
+     */
+    public void crearEnemigoComoAdmin(Evento evento, String tipo, int liana, int plataforma) {
+        float x;
+        float y;
+        String tipoFinal = tipo;
+
+        if ("CROC_BLUE".equalsIgnoreCase(tipo)) {
+            LayoutDKJr.LianaDef l = LayoutDKJr.getLiana(liana);
+            x = l.x;
+            y = LayoutDKJr.getYTopLiana(liana);
+            tipoFinal = "CROC_BLUE_LIANA"; // si querés ser más explícito
+        } else {
+            if (plataforma >= 0) {
+                // ROJO EN PLATAFORMA
+                LayoutDKJr.PlataformaDef p = LayoutDKJr.getPlataforma(plataforma);
+                x = LayoutDKJr.getXCentroPlataforma(plataforma);
+                y = p.y;
+                tipoFinal = "CROC_RED_PLATAFORMA_" + plataforma;
+            } else {
+                // ROJO EN LIANA
+                LayoutDKJr.LianaDef l = LayoutDKJr.getLiana(liana);
+                x = l.x;
+                y = LayoutDKJr.getYTopLiana(liana);
+                tipoFinal = "CROC_RED_LIANA";
+            }
+        }
+
+        gestor.crearEnemigo(tipoFinal, x, y);
+
+        Paquete p = Paquete.crearEnemigo("ADMIN", tipoFinal, x, y);
+        notifyByEvento(evento, p);
+
+        System.out.println("[ADMIN] Enemigo " + tipoFinal + " creado en " + evento +
+                        " (liana=" + liana + ", plataforma=" + plataforma +
+                        ") -> (" + x + ", " + y + ")");
+    }
+
+
+    
+    /**
+     * Crear fruta desde la consola del admin.
+     */
+    public void crearFrutaComoAdmin(Evento evento, int liana, int alturaIndex, int puntos) {
+        float x = LayoutDKJr.getXForLiana(liana);
+        float y = LayoutDKJr.getYOnLiana(liana, alturaIndex);
+
+        // 1) Crear en el gestor
+        gestor.crearFruta(x, y, puntos);
+
+        // 2) Notificar a los clientes de ese evento
+        Paquete p = Paquete.crearFruta("ADMIN", x, y, puntos);
+        notifyByEvento(evento, p);
+
+        System.out.println("[ADMIN] Fruta creada en " + evento +
+                           " (liana=" + liana + ", altura=" + alturaIndex +
+                           ", puntos=" + puntos + ") -> (" + x + ", " + y + ")");
+    }
+
+    /**
+     * Inicia un hilo que permite a un usuario administrador crear
+     * enemigos y frutas desde la consola del servidor.
+     */
+    private void startAdminConsole() {
+        Thread adminThread = new Thread(() -> {
+            java.util.Scanner sc = new java.util.Scanner(System.in);
+
+            System.out.println("===========================================");
+            System.out.println("[ADMIN] Consola de administración iniciada");
+            System.out.println("Comandos disponibles:");
+            System.out.println("  enemigo - crear cocodrilo (rojo/azul)");
+            System.out.println("  fruta   - crear fruta");
+            System.out.println("  map     - mostrar mapa lógico (lianas/plataformas)");
+            System.out.println("  ayuda   - mostrar comandos");
+            System.out.println("  salir   - terminar consola admin (no apaga el server)");
+            System.out.println("===========================================");
+
+            while (true) {
+                System.out.print("[ADMIN] > ");
+                String cmd = sc.nextLine().trim().toLowerCase();
+
+                if (cmd.equals("salir")) {
+                    System.out.println("[ADMIN] Consola de administración finalizada.");
+                    break;
+                }
+
+                if (cmd.equals("ayuda")) {
+                    System.out.println("Comandos:");
+                    System.out.println("  enemigo - crear cocodrilo (rojo/azul)");
+                    System.out.println("  fruta   - crear fruta");
+                    System.out.println("  map     - mostrar mapa lógico (lianas/plataformas)");
+                    System.out.println("  salir   - salir de la consola admin");
+                    continue;
+                }
+
+                if (cmd.equals("map")) {
+                    printMap();
+                    continue;
+                }
+
+                if (cmd.equals("enemigo")) {
+                    try {
+                        System.out.print("  Tipo (CROC_RED/CROC_BLUE): ");
+                        String tipo = sc.nextLine().trim();
+
+                        System.out.print("  Evento (1 = JUEGO_1, 2 = JUEGO_2): ");
+                        int idxEv = Integer.parseInt(sc.nextLine().trim()) - 1;
+                        Evento evento = Evento.fromIndex(idxEv);
+
+                        int liana = -1;
+                        int plataforma = -1;
+
+                        if ("CROC_BLUE".equalsIgnoreCase(tipo)) {
+                            // SOLO liana
+                            System.out.print("  Liana (0,1,2,...): ");
+                            liana = Integer.parseInt(sc.nextLine().trim());
+                            plataforma = -1; // no aplica
+
+                        } else { // CROC_RED
+                            System.out.print("  ¿Dónde? (1 = liana, 2 = plataforma): ");
+                            int destino = Integer.parseInt(sc.nextLine().trim());
+
+                            if (destino == 1) {
+                                System.out.print("  Liana (0,1,2,...): ");
+                                liana = Integer.parseInt(sc.nextLine().trim());
+                                plataforma = -1; // no aplica
+                            } else {
+                                System.out.print("  Plataforma (0,1,2,...): ");
+                                plataforma = Integer.parseInt(sc.nextLine().trim());
+                                // la liana no se usa cuando plataforma >= 0,
+                                // pero ponemos algún valor válido por si acaso
+                                liana = 0;
+                            }
+                        }
+
+                        crearEnemigoComoAdmin(evento, tipo, liana, plataforma);
+
+                    } catch (Exception e) {
+                        System.out.println("[ADMIN] Error leyendo datos de enemigo: " + e.getMessage());
+                    }
+                    continue;
+                }
+
+                if (cmd.equals("fruta")) {
+                    try {
+                        System.out.print("  Evento (1 = JUEGO_1, 2 = JUEGO_2): ");
+                        int idxEv = Integer.parseInt(sc.nextLine().trim()) - 1;
+                        Evento evento = Evento.fromIndex(idxEv);
+
+                        System.out.print("  Liana (0,1,2,...): ");
+                        int liana = Integer.parseInt(sc.nextLine().trim());
+
+                        System.out.print("  Altura en la liana (0 = arriba, 1 = medio, 2 = abajo): ");
+                        int altura = Integer.parseInt(sc.nextLine().trim());
+
+                        System.out.print("  Puntos de la fruta: ");
+                        int puntos = Integer.parseInt(sc.nextLine().trim());
+
+                        crearFrutaComoAdmin(evento, liana, altura, puntos);
+
+                    } catch (Exception e) {
+                        System.out.println("[ADMIN] Error leyendo datos de fruta: " + e.getMessage());
+                    }
+                    continue;
+                }
+
+                System.out.println("[ADMIN] Comando desconocido. Escribe 'ayuda' para ver opciones.");
+            }
+        });
+
+        adminThread.setDaemon(true); // no impide que el server se cierre si el main termina
+        adminThread.start();
+    }
+
+    // Imprime el mapa lógico (lianas y plataformas) en la consola
+    private void printMap() {
+        System.out.println("===========================================");
+        System.out.println("              MAPA LÓGICO DK JR           ");
+        System.out.println("===========================================");
+
+        // ---- Lianas ----
+        try {
+            int numLianas = LayoutDKJr.getCantidadLianas();
+            System.out.println("-- LIANAS (índice -> x aproximada) --");
+            for (int i = 0; i < numLianas; i++) {
+                float x = LayoutDKJr.getXForLiana(i);
+                System.out.printf("  Liana %d -> x = %.1f%n", i, x);
+            }
+        } catch (Exception e) {
+            System.out.println("[WARN] No se pudo obtener lista de lianas desde LayoutDKJr: " + e.getMessage());
+        }
+
+        // ---- Plataformas ----
+        try {
+            int numPlataformas = LayoutDKJr.getCantidadPlataformas();
+            System.out.println("-- PLATAFORMAS (índice -> y aproximada) --");
+            for (int i = 0; i < numPlataformas; i++) {
+                float y = LayoutDKJr.getYForPlataforma(i);
+                System.out.printf("  Plataforma %d -> y = %.1f%n", i, y);
+            }
+        } catch (Exception e) {
+            System.out.println("[WARN] No se pudo obtener lista de plataformas desde LayoutDKJr: " + e.getMessage());
+        }
+
+        System.out.println("===========================================");
+        System.out.println("TIP: Usa estos índices al crear enemigos/frutas.");
+    }
+
+
     
     // =============== MAIN ===============
     
