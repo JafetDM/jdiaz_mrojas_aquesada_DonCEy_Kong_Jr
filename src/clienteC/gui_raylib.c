@@ -49,7 +49,7 @@ int main(void) {
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Juego con JSON");
     SetTargetFPS(60);
 
-    Texture2D player = LoadTexture("assets/dk.jpg");
+    Texture2D player = LoadTexture("assets/dk_jr.png");
     Texture2D stage  = LoadTexture("assets/stage.png");
 
     // Estado inicial vacío

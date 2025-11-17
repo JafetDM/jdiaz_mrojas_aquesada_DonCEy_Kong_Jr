@@ -11,6 +11,7 @@ public abstract class Enemigo implements ElementoJuego {
     protected float y;
     protected float velocidad;
     protected boolean vivo = true;
+    protected String direccion = "DOWN";
 
     public Enemigo(float x, float y, float velocidad) {
         this.id = SIGUIENTE_ID++;
@@ -29,6 +30,10 @@ public abstract class Enemigo implements ElementoJuego {
     public float getY() { return y; }
 
     public boolean estaVivo() { return vivo; }
+
+    public String getDireccion() {
+        return direccion;
+    }
 
     @Override
     public abstract void actualizar(float dt);
@@ -64,12 +69,16 @@ class CocodriloRojoLiana extends Enemigo {
     public void actualizar(float dt) {
         if (bajando) {
             y += velocidad * dt;
+            direccion = "DOWN";
+
             if (y >= maxY) {
                 y = maxY;
                 bajando = false;
             }
         } else {
             y -= velocidad * dt;
+            direccion = "UP";
+
             if (y <= minY) {
                 y = minY;
                 bajando = true;
@@ -110,12 +119,16 @@ class CocodriloRojoPlataforma extends Enemigo {
     public void actualizar(float dt) {
         if (moviendoDerecha) {
             x += velocidad * dt;
+            direccion = "RIGHT";
+
             if (x >= maxX) {
                 x = maxX;
                 moviendoDerecha = false;
             }
         } else {
             x -= velocidad * dt;
+            direccion = "LEFT";
+
             if (x <= minX) {
                 x = minX;
                 moviendoDerecha = true;
@@ -151,6 +164,8 @@ class CocodriloAzul extends Enemigo {
     @Override
     public void actualizar(float dt) {
         y += velocidad * dt;
+        direccion = "DOWN";
+        
         if (y >= limiteY) {
             vivo = false; // el GestorJuego lo elimina
         }

@@ -1,4 +1,7 @@
 // cliente.c - Adaptado para comunicarse con servidor Java usando Paquete y GameState
+#define PLAYER_SCALE 0.3f   // 30% del tamaño original
+#define FRUIT_SCALE  0.2f   // 20%
+#define ENEMY_TARGET_SIZE 32.0f
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -38,6 +41,7 @@ typedef struct {
     float x, y;
     int puntos;
     bool recolectada;
+    char tipo[32];
 } Fruit;
 
 typedef struct {
@@ -74,6 +78,27 @@ static volatile bool g_running = true;
 static pthread_mutex_t g_send_mutex = PTHREAD_MUTEX_INITIALIZER;
 static char g_playerName[64] = "ClienteC";
 static char g_eventoAsignado[32] = "";
+
+// Texturas globales
+static Texture2D g_playerTex = {0};
+static Texture2D g_stageTex  = {0};
+
+// Frutas
+static Texture2D g_texMango   = {0};
+static Texture2D g_texBanano  = {0};
+static Texture2D g_texManzana = {0};
+
+// Cocodrilos rojos
+static Texture2D g_texCrocRedUp    = {0};
+static Texture2D g_texCrocRedDown  = {0};
+static Texture2D g_texCrocRedLeft  = {0};
+static Texture2D g_texCrocRedRight = {0};
+
+// Cocodrilos azules
+static Texture2D g_texCrocBlueUp    = {0};
+static Texture2D g_texCrocBlueDown  = {0};
+static Texture2D g_texCrocBlueLeft  = {0};
+static Texture2D g_texCrocBlueRight = {0};
 
 // ===========================
 // Funciones auxiliares para arrays dinámicos
@@ -279,6 +304,7 @@ static void parse_game_state_json(const char *jsonText) {
             cJSON *x      = cJSON_GetObjectItem(e, "x");
             cJSON *y      = cJSON_GetObjectItem(e, "y");
             cJSON *vel    = cJSON_GetObjectItem(e, "velocidad");
+            cJSON *dir    = cJSON_GetObjectItem(e, "direccion");  
 
             Enemy *dst = &g_state.enemigos[g_state.totalEnemigos++];
             memset(dst, 0, sizeof(Enemy));
@@ -297,11 +323,13 @@ static void parse_game_state_json(const char *jsonText) {
             dst->y = y ? (float)y->valuedouble : 0.0f;
             dst->velocidad = vel ? (float)vel->valuedouble : 0.0f;
 
-            // Por ahora no mandamos dirección desde el servidor
-            strcpy(dst->direccion, "");
+            if (dir && cJSON_IsString(dir)) {               
+                strncpy(dst->direccion, dir->valuestring,
+                        sizeof(dst->direccion) - 1);
+            } else {
+                strcpy(dst->direccion, "");
+            }
         }
-
-        // printf("[STATE] Enemigos: %d\n", g_state.totalEnemigos);
     }
 
     // Frutas
@@ -321,6 +349,7 @@ static void parse_game_state_json(const char *jsonText) {
             cJSON *y         = cJSON_GetObjectItem(f, "y");
             cJSON *puntos    = cJSON_GetObjectItem(f, "puntos");
             cJSON *recolecta = cJSON_GetObjectItem(f, "recolectada");
+            cJSON *tipo      = cJSON_GetObjectItem(f, "tipo");  
 
             Fruit *dst = &g_state.frutas[g_state.totalFrutas++];
             memset(dst, 0, sizeof(Fruit));
@@ -340,9 +369,14 @@ static void parse_game_state_json(const char *jsonText) {
             } else {
                 dst->recolectada = false;
             }
-        }
 
-        // printf("[STATE] Frutas: %d\n", g_state.totalFrutas);
+            if (tipo && cJSON_IsString(tipo)) {              
+                strncpy(dst->tipo, tipo->valuestring,
+                        sizeof(dst->tipo) - 1);
+            } else {
+                strcpy(dst->tipo, "");
+            }
+        }
     }
     
     pthread_mutex_unlock(&g_state.mutex);
@@ -528,26 +562,114 @@ static void render_game(Texture2D stageTex) {
     for (int i = 0; i < g_state.totalJugadores; i++) {
         Player *p = &g_state.jugadores[i];
         
-        // Mi jugador en azul, otros en verde
-        Color color = (strcmp(p->playerName, g_playerName) == 0) ? BLUE : GREEN;
-        
-        DrawCircle((int)p->x, (int)p->y, 15, color);
+        if (strcmp(p->playerName, g_playerName) == 0 && g_playerTex.id != 0) {
+            Rectangle src = { 0, 0, (float)g_playerTex.width, (float)g_playerTex.height };
+
+            float w = g_playerTex.width  * PLAYER_SCALE;
+            float h = g_playerTex.height * PLAYER_SCALE;
+
+            Rectangle dst = { p->x, p->y, w, h };
+            Vector2 origin = { w / 2.0f, h / 2.0f };   // ojo: mitad del tamaño escalado
+
+            DrawTexturePro(g_playerTex, src, dst, origin, 0.0f, WHITE);
+        } else {
+            // Otros jugadores como círculo por ahora
+            Color color = GREEN;
+            DrawCircle((int)p->x, (int)p->y, 15, color);
+        }
+
         DrawText(p->playerName, (int)p->x - 20, (int)p->y - 30, 10, BLACK);
     }
     
     // Dibujar enemigos
     for (int i = 0; i < g_state.totalEnemigos; i++) {
-        DrawCircle((int)g_state.enemigos[i].x, (int)g_state.enemigos[i].y, 10, RED);
+        Enemy *e = &g_state.enemigos[i];
+
+        Texture2D tex = {0};
+
+        bool isRed  = (strncmp(e->tipo, "CROC_RED", 8)  == 0);
+        bool isBlue = (strncmp(e->tipo, "CROC_BLUE", 9) == 0);
+        const char *dir = e->direccion;
+
+        if (isRed) {
+            if (strcmp(dir, "UP") == 0 && g_texCrocRedUp.id)
+                tex = g_texCrocRedUp;
+            else if (strcmp(dir, "DOWN") == 0 && g_texCrocRedDown.id)
+                tex = g_texCrocRedDown;
+            else if (strcmp(dir, "LEFT") == 0 && g_texCrocRedLeft.id)
+                tex = g_texCrocRedLeft;
+            else if (strcmp(dir, "RIGHT") == 0 && g_texCrocRedRight.id)
+                tex = g_texCrocRedRight;
+        } else if (isBlue) {
+            if (strcmp(dir, "UP") == 0 && g_texCrocBlueUp.id)
+                tex = g_texCrocBlueUp;
+            else if (strcmp(dir, "DOWN") == 0 && g_texCrocBlueDown.id)
+                tex = g_texCrocBlueDown;
+            else if (strcmp(dir, "LEFT") == 0 && g_texCrocBlueLeft.id)
+                tex = g_texCrocBlueLeft;
+            else if (strcmp(dir, "RIGHT") == 0 && g_texCrocBlueRight.id)
+                tex = g_texCrocBlueRight;
+        }
+
+        if (tex.id != 0) {
+            Rectangle src = { 0, 0, (float)tex.width, (float)tex.height };
+
+            // Escala automática para que TODOS los cocodrilos tengan tamaño parecido
+            float texW = (float)tex.width;
+            float texH = (float)tex.height;
+
+            // Usamos la dimensión mayor para mantener proporción sin deformar
+            float mayor = (texW > texH) ? texW : texH;
+
+            // Qué tanto hay que escalar para que "mayor" pase a ser ENEMY_TARGET_SIZE
+            float scale = ENEMY_TARGET_SIZE / mayor;
+
+            float w = texW * scale;
+            float h = texH * scale;
+
+            Rectangle dst = (Rectangle){ e->x, e->y, w, h };
+            Vector2 origin = (Vector2){ w / 2.0f, h / 2.0f };
+
+            DrawTexturePro(tex, src, dst, origin, 0.0f, WHITE);
+        } else {
+            // Fallback si no hay textura
+            DrawCircle((int)e->x, (int)e->y, 10, RED);
+        }
     }
     
     // Dibujar frutas
     for (int i = 0; i < g_state.totalFrutas; i++) {
-        if (!g_state.frutas[i].recolectada) {
-            DrawCircle((int)g_state.frutas[i].x, (int)g_state.frutas[i].y, 8, YELLOW);
+        Fruit *f = &g_state.frutas[i];
+
+        if (f->recolectada) continue;
+
+        Texture2D tex = {0};
+
+        if (strcmp(f->tipo, "MANGO") == 0 && g_texMango.id) {
+            tex = g_texMango;
+        } else if (strcmp(f->tipo, "BANANO") == 0 && g_texBanano.id) {
+            tex = g_texBanano;
+        } else if (strcmp(f->tipo, "MANZANA") == 0 && g_texManzana.id) {
+            tex = g_texManzana;
+        }
+
+        if (tex.id != 0) {
+            Rectangle src = { 0, 0, (float)tex.width, (float)tex.height };
+
+            float w = tex.width  * FRUIT_SCALE;
+            float h = tex.height * FRUIT_SCALE;
+
+            Rectangle dst = { f->x, f->y, w, h };
+            Vector2 origin = { w / 2.0f, h / 2.0f };
+
+            DrawTexturePro(tex, src, dst, origin, 0.0f, WHITE);
+        } else {
+            // Fallback si algo falla
+            DrawCircle((int)f->x, (int)f->y, 8, YELLOW);
         }
     }
     
-    //Dibujar layout debug si está activado
+    // Dibujar layout debug si está activado
     if (g_showLayoutDebug) {
         // Dibujar PLATAFORMAS como segmentos horizontales
         for (int i = 0; i < NUM_PLATAFORMAS; i++) {
@@ -605,6 +727,7 @@ static void render_game(Texture2D stageTex) {
     
     EndDrawing();
 }
+
 
 // -------------------------
 // Main
@@ -673,11 +796,37 @@ int main(int argc, char *argv[]) {
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Cliente C - Java Server");
     SetTargetFPS(TARGET_FPS);
     
+    // Texturas locales
     Texture2D playerTex = {0};
-    Texture2D stageTex = {0};
-    
-    if (FileExists(PLAYER_TEXTURE_PATH)) playerTex = LoadTexture(PLAYER_TEXTURE_PATH);
-    if (FileExists(STAGE_TEXTURE_PATH)) stageTex = LoadTexture(STAGE_TEXTURE_PATH);
+    Texture2D stageTex  = {0};
+
+    if (FileExists(PLAYER_TEXTURE_PATH)) {
+        playerTex = LoadTexture(PLAYER_TEXTURE_PATH);
+    }
+    if (FileExists(STAGE_TEXTURE_PATH)) {
+        stageTex = LoadTexture(STAGE_TEXTURE_PATH);
+    }
+
+    // Copiarlas a las globales para usarlas en render_game
+    g_playerTex = playerTex;
+    g_stageTex  = stageTex;
+
+    // Cargar frutas (ajusta las rutas a tus archivos reales)
+    if (FileExists("assets/mango.png"))   g_texMango   = LoadTexture("assets/mango.png");
+    if (FileExists("assets/banano.png"))  g_texBanano  = LoadTexture("assets/banano.png");
+    if (FileExists("assets/manzana.png")) g_texManzana = LoadTexture("assets/manzana.png");
+
+    // Cocodrilos rojos
+    if (FileExists("assets/r_arr.png"))    g_texCrocRedUp    = LoadTexture("assets/r_arr.png");
+    if (FileExists("assets/r_ab.png"))  g_texCrocRedDown  = LoadTexture("assets/r_ab.png");
+    if (FileExists("assets/r_izq.png"))  g_texCrocRedLeft  = LoadTexture("assets/r_izq.png");
+    if (FileExists("assets/r_der.png")) g_texCrocRedRight = LoadTexture("assets/r_der.png");
+
+    // Cocodrilos azules
+    if (FileExists("assets/a_arr.png"))    g_texCrocBlueUp    = LoadTexture("assets/a_arr.png");
+    if (FileExists("assets/a_ab.png"))  g_texCrocBlueDown  = LoadTexture("assets/a_ab.png");
+    if (FileExists("assets/a_izq.png"))  g_texCrocBlueLeft  = LoadTexture("assets/a_izq.png");
+    if (FileExists("assets/a_der.png")) g_texCrocBlueRight = LoadTexture("assets/a_der.png");
     
     // =======================================
     // PASO 5: Loop principal
@@ -701,6 +850,20 @@ int main(int argc, char *argv[]) {
     
     if (playerTex.id != 0) UnloadTexture(playerTex);
     if (stageTex.id != 0) UnloadTexture(stageTex);
+    if (g_texMango.id)        UnloadTexture(g_texMango);
+    if (g_texBanano.id)       UnloadTexture(g_texBanano);
+    if (g_texManzana.id)      UnloadTexture(g_texManzana);
+
+    if (g_texCrocRedUp.id)    UnloadTexture(g_texCrocRedUp);
+    if (g_texCrocRedDown.id)  UnloadTexture(g_texCrocRedDown);
+    if (g_texCrocRedLeft.id)  UnloadTexture(g_texCrocRedLeft);
+    if (g_texCrocRedRight.id) UnloadTexture(g_texCrocRedRight);
+
+    if (g_texCrocBlueUp.id)    UnloadTexture(g_texCrocBlueUp);
+    if (g_texCrocBlueDown.id)  UnloadTexture(g_texCrocBlueDown);
+    if (g_texCrocBlueLeft.id)  UnloadTexture(g_texCrocBlueLeft);
+    if (g_texCrocBlueRight.id) UnloadTexture(g_texCrocBlueRight);
+
     CloseWindow();
     
     free(g_state.jugadores);

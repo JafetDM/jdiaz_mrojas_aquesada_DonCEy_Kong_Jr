@@ -127,6 +127,31 @@ public class GestorJuego {
         elementos.add(fabrica.crearFruta(x, y, puntos));
     }
 
+    public boolean eliminarFrutaPorPosicion(float x, float y, float tolerancia) {
+        boolean eliminada = false;
+
+        Iterator<ElementoJuego> it = elementos.iterator();
+        while (it.hasNext()) {
+            ElementoJuego e = it.next();
+            if (e instanceof Fruta) {
+                Fruta f = (Fruta) e;
+
+                float dx = f.getX() - x;
+                float dy = f.getY() - y;
+
+                if (Math.abs(dx) <= tolerancia && Math.abs(dy) <= tolerancia) {
+                    it.remove();
+                    eliminada = true;
+                    // Si solo querés borrar la primera que coincida:
+                    // break;
+                }
+            }
+        }
+
+        return eliminada;
+    }
+
+
     public void actualizar(float dt) {
         Iterator<ElementoJuego> it = elementos.iterator();
         while (it.hasNext()) {

@@ -11,24 +11,45 @@ import java.util.concurrent.CopyOnWriteArrayList;
  */
 public class GameServer {
     private final int port;
+
+    private static final String MAP_IMAGE_PATH = "src/serverJava/assets/mapa.png";
     
     // Lista de handlers de clientes
     private final List<ClientHandler> clients = new CopyOnWriteArrayList<>();
+
+    // ================== HELPERS DE CLIENTES / EVENTOS ==================
+    private int contarClientesPorEvento(Evento evento) {
+        int count = 0;
+        for (ClientHandler c : clients) {
+            if (c.getEvento() == evento) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private boolean tieneClientesEnEvento(Evento evento) {
+        return contarClientesPorEvento(evento) > 0;
+    }
+
+    private int getTotalClientes() {
+        return clients.size();
+    }
     
-    // Gestor del juego
-    private final GestorJuego gestor;
-    
+    // Gestor del juego por evento
+    private final Map<Evento, GestorJuego> gestores = new HashMap<>();
+
     // ========== PATRÓN OBSERVER: Map de Publishers por Evento ==========
     private final Map<Evento, EventPublisher> publishers = new HashMap<>();
     
     public GameServer(int port) {
         this.port = port;
-        this.gestor = new GestorJuego(new GestorJuego.FabricaDKJr());
-        
-        // Crear un Publisher para cada Evento
+
+        // Crear un Publisher y un GestorJuego para cada Evento
         for (Evento evento : Evento.values()) {
             publishers.put(evento, new EventPublisher(evento));
-            System.out.println("[*] Publisher creado para " + evento);
+            gestores.put(evento, new GestorJuego(new GestorJuego.FabricaDKJr()));
+            System.out.println("[*] Publisher y GestorJuego creados para " + evento);
         }
     }
     
@@ -102,14 +123,39 @@ public class GameServer {
             while (true) {
                 // Aceptar cliente
                 Socket clientSocket = serverSocket.accept();
+
+                // ============================
+                // Límite global: máximo 2 jugadores
+                // ============================
+                if (getTotalClientes() >= 2) {
+                    System.out.println("[!] Conexión rechazada: máximo de 2 jugadores alcanzado.");
+
+                    try (DataOutputStream tempOut = new DataOutputStream(
+                            new BufferedOutputStream(clientSocket.getOutputStream()))) {
+
+                        Paquete pError = new Paquete("ERROR", "Server", 0, 0);
+                        pError.datos = "Servidor lleno: máximo 2 jugadores activos.";
+                        String jsonError = pError.toJson();
+
+                        tempOut.writeUTF(jsonError);
+                        tempOut.flush();
+                    } catch (IOException ioe) {
+                        System.err.println("[ERROR] Al enviar mensaje de servidor lleno: " + ioe.getMessage());
+                    }
+
+                    clientSocket.close();
+                    continue; // seguir esperando otra conexión
+                }
+
+                // Si hay espacio, seguimos normal
                 playerCount++;
                 String playerName = "Jugador" + playerCount;
-                
+
                 // Asignar evento: jugadores impares al JUEGO_1, pares al JUEGO_2
                 Evento evento = (playerCount % 2 == 1) ? Evento.JUEGO_1 : Evento.JUEGO_2;
                 
                 System.out.println("\n[+] " + playerName + " conectado desde " 
-                                 + clientSocket.getInetAddress());
+                                + clientSocket.getInetAddress());
                 System.out.println("[*] Asignado a: " + evento);
                 
                 // Crear handler con el evento asignado
@@ -119,9 +165,6 @@ public class GameServer {
                 
                 // Iniciar thread del handler PRIMERO
                 new Thread(handler).start();
-                
-                // Dar tiempo al thread para inicializarse
-                //Thread.sleep(100);
                 
                 // LUEGO enviar mensaje de bienvenida
                 Paquete bienvenida = new Paquete("BIENVENIDA", "Server", 0, 0);
@@ -147,8 +190,10 @@ public class GameServer {
             
             while (true) {
                 try {
-                    // Actualizar gestor del juego
-                    gestor.actualizar(dt);
+                    // Actualizar todos los gestores de todos los eventos
+                    for (GestorJuego g : gestores.values()) {
+                        g.actualizar(dt);
+                    }
                     
                     // Broadcast del estado cada 100ms (10 veces por segundo)
                     long now = System.currentTimeMillis();
@@ -172,11 +217,23 @@ public class GameServer {
     
     // Envía el estado del juego a todos los suscriptores de cada evento
     private void broadcastGameStates() {
-        // Obtener snapshot global de elementos
-        List<ElementoJuego> elementos = gestor.obtenerElementos();
+        // Para cada evento, usamos SU propio GestorJuego
+        for (Map.Entry<Evento, EventPublisher> entry : publishers.entrySet()) {
+            Evento evento = entry.getKey();
+            EventPublisher publisher = entry.getValue();
 
-        for (EventPublisher publisher : publishers.values()) {
+            GestorJuego gestorEvento = gestores.get(evento);
+            if (gestorEvento == null) {
+                continue; // por seguridad
+            }
+
+            // Elementos SOLO de este juego
+            List<ElementoJuego> elementos = gestorEvento.obtenerElementos();
+
             GameState gameState = publisher.getGameState();
+            if (gameState == null) {
+                continue;
+            }
 
             // Actualizar enemigos y frutas dentro del GameState
             gameState.actualizarEnemigosYFrutas(elementos);
@@ -196,51 +253,58 @@ public class GameServer {
             System.err.println("Paquete inválido recibido");
             return;
         }
-        
+
         // Solo log de tipos importantes (no MOVIMIENTO)
         if (!paquete.tipo.equals("MOVIMIENTO")) {
             System.out.println("[INPUT] " + paquete);
         }
-        
-        // Obtener el publisher del evento del cliente
+
+        // Obtener el evento del cliente
         Evento evento = sender.getEvento();
         EventPublisher publisher = publishers.get(evento);
-        
+        GestorJuego gestorEvento = gestores.get(evento);
+
         if (publisher == null) {
             System.err.println("[ERROR] No existe publisher para " + evento);
             return;
         }
-        
+        if (gestorEvento == null) {
+            System.err.println("[ERROR] No existe GestorJuego para " + evento);
+            return;
+        }
+
         // Obtener el GameState del publisher
         GameState gameState = publisher.getGameState();
-        
+
         if (gameState == null) {
             System.err.println("[ERROR] GameState es null para " + evento);
             return;
         }
-        
+
         // Procesar según el tipo de paquete
         switch (paquete.tipo) {
             case "MOVIMIENTO":
                 // Actualizar posición del jugador en el GameState
                 gameState.actualizarJugador(paquete.playerName, paquete.x, paquete.y);
-                
+
                 // Notificar a todos los subscribers del mismo evento
                 publisher.notifySubscribers(paquete);
                 break;
-                
+
             case "CREAR_ENEMIGO":
                 if (paquete.enemyTipo != null) {
-                    gestor.crearEnemigo(paquete.enemyTipo, paquete.x, paquete.y);
+                    // Crear enemigo SOLO en el gestor de este evento
+                    gestorEvento.crearEnemigo(paquete.enemyTipo, paquete.x, paquete.y);
                     publisher.notifySubscribers(paquete);
                 }
                 break;
-                
+
             case "CREAR_FRUTA":
-                gestor.crearFruta(paquete.x, paquete.y, paquete.puntos);
+                // Crear fruta SOLO en el gestor de este evento
+                gestorEvento.crearFruta(paquete.x, paquete.y, paquete.puntos);
                 publisher.notifySubscribers(paquete);
                 break;
-                
+
             default:
                 // Retransmitir otros tipos de paquetes
                 publisher.notifySubscribers(paquete);
@@ -307,28 +371,328 @@ public class GameServer {
         EventPublisher publisher = publishers.get(evento);
         return publisher != null ? publisher.getGameState() : null;
     }
-    
-    // =============== MÉTODOS DEL GESTOR ===============
-    
-    public void crearEnemigo(String tipo, float x, float y) {
-        gestor.crearEnemigo(tipo, x, y);
-    }
-    
-    public void crearFruta(float x, float y, int puntos) {
-        gestor.crearFruta(x, y, puntos);
-    }
-    
-    public List<ElementoJuego> obtenerElementos() {
-        return gestor.obtenerElementos();
-    }
 
     // =============== MÉTODOS DEL ADMIN ===============
+
+    // Lee un entero con mensaje y validación básica
+    private int leerEntero(Scanner sc, String prompt) {
+        while (true) {
+            System.out.print(prompt + ": ");
+            String linea = sc.nextLine().trim();
+            try {
+                return Integer.parseInt(linea);
+            } catch (NumberFormatException e) {
+                System.out.println("  [ADMIN] Valor inválido, ingrese un número.");
+            }
+        }
+    }
+
+    // Lee un entero entre [min, max] inclusive
+    private int leerEnteroEnRango(Scanner sc, String prompt, int min, int max) {
+        while (true) {
+            int valor = leerEntero(sc, prompt + " (" + min + " - " + max + ")");
+            if (valor < min || valor > max) {
+                System.out.println("  [ADMIN] Fuera de rango, intente de nuevo.");
+            } else {
+                return valor;
+            }
+        }
+    }
+
+    // Helper para leer el evento (Juego 1 / Juego 2) con validación
+    private Evento leerEvento(java.util.Scanner sc) {
+        System.out.print("  Evento (1 = JUEGO_1, 2 = JUEGO_2): ");
+        String lineaEv = sc.nextLine().trim();
+        int idxEv;
+        try {
+            idxEv = Integer.parseInt(lineaEv) - 1;
+        } catch (NumberFormatException e) {
+            System.out.println("  [ADMIN] Error: evento debe ser 1 o 2.");
+            return null;
+        }
+
+        if (idxEv < 0 || idxEv >= Evento.values().length) {
+            System.out.println("  [ADMIN] Error: evento inválido.");
+            return null;
+        }
+
+        return Evento.fromIndex(idxEv);
+    }
+
+    // Opción 1 del menú: crear enemigo
+    private void manejarCrearEnemigo(java.util.Scanner sc) {
+        System.out.println("---- Crear ENEMIGO ----");
+
+        // 1) Leer evento
+        Evento evento = leerEvento(sc);
+        if (evento == null) return;
+        // Validar que el evento tenga al menos un cliente activo
+        if (!tieneClientesEnEvento(evento)) {
+            System.out.println("  [ADMIN] No hay clientes activos en " + evento +
+                            ". No se crearán enemigos en este juego.");
+            return;
+        }
+
+        // 2) Tipo de enemigo (numérico)
+        System.out.println("  Tipo de enemigo:");
+        System.out.println("    1) Cocodrilo ROJO");
+        System.out.println("    2) Cocodrilo AZUL");
+        System.out.print("  Opción: ");
+
+        String lineaTipo = sc.nextLine().trim();
+        int opTipo;
+        try {
+            opTipo = Integer.parseInt(lineaTipo);
+        } catch (NumberFormatException e) {
+            System.out.println("  [ADMIN] Error: debe ser 1 o 2.");
+            return;
+        }
+
+        String tipo;
+        if (opTipo == 1) {
+            tipo = "CROC_RED";
+        } else if (opTipo == 2) {
+            tipo = "CROC_BLUE";
+        } else {
+            System.out.println("  [ADMIN] Error: tipo inválido (usa 1 o 2).");
+            return;
+        }
+
+        // 3) Si es AZUL -> siempre en liana
+        if ("CROC_BLUE".equals(tipo)) {
+            System.out.println("  (AZUL siempre baja por una liana)");
+            System.out.print("  Liana (0.." + (LayoutDKJr.getCantidadLianas() - 1) + "): ");
+            String lineaL = sc.nextLine().trim();
+
+            int liana;
+            try {
+                liana = Integer.parseInt(lineaL);
+            } catch (NumberFormatException e) {
+                System.out.println("  [ADMIN] Error: la liana debe ser numérica.");
+                return;
+            }
+
+            if (liana < 0 || liana >= LayoutDKJr.getCantidadLianas()) {
+                System.out.println("  [ADMIN] Error: liana fuera de rango.");
+                return;
+            }
+
+            int plataforma = -1; // no aplica
+            crearEnemigoComoAdmin(evento, tipo, liana, plataforma);
+            return;
+        }
+
+        // 4) Si es ROJO -> elegir destino (liana o plataforma)
+        System.out.println("  ¿Dónde aparece el ROJO?");
+        System.out.println("    1) Liana");
+        System.out.println("    2) Plataforma");
+        System.out.print("  Opción: ");
+
+        String lineaDest = sc.nextLine().trim();
+        int opDest;
+        try {
+            opDest = Integer.parseInt(lineaDest);
+        } catch (NumberFormatException e) {
+            System.out.println("  [ADMIN] Error: debe ser 1 o 2.");
+            return;
+        }
+
+        if (opDest == 1) {
+            // ROJO EN LIANA
+            System.out.print("  Liana (0.." + (LayoutDKJr.getCantidadLianas() - 1) + "): ");
+            String lineaL = sc.nextLine().trim();
+
+            int liana;
+            try {
+                liana = Integer.parseInt(lineaL);
+            } catch (NumberFormatException e) {
+                System.out.println("  [ADMIN] Error: la liana debe ser numérica.");
+                return;
+            }
+
+            if (liana < 0 || liana >= LayoutDKJr.getCantidadLianas()) {
+                System.out.println("  [ADMIN] Error: liana fuera de rango.");
+                return;
+            }
+
+            int plataforma = -1; // no aplica
+            crearEnemigoComoAdmin(evento, tipo, liana, plataforma);
+
+        } else if (opDest == 2) {
+            // ROJO EN PLATAFORMA
+            System.out.print("  Plataforma (0.." + (LayoutDKJr.getCantidadPlataformas() - 1) + "): ");
+            String lineaP = sc.nextLine().trim();
+
+            int plataforma;
+            try {
+                plataforma = Integer.parseInt(lineaP);
+            } catch (NumberFormatException e) {
+                System.out.println("  [ADMIN] Error: la plataforma debe ser numérica.");
+                return;
+            }
+
+            if (plataforma < 0 || plataforma >= LayoutDKJr.getCantidadPlataformas()) {
+                System.out.println("  [ADMIN] Error: plataforma fuera de rango.");
+                return;
+            }
+
+            int liana = 0; // no se usa realmente para plataforma, pero ponemos algo válido
+            crearEnemigoComoAdmin(evento, tipo, liana, plataforma);
+
+        } else {
+            System.out.println("  [ADMIN] Error: destino inválido (usa 1 o 2).");
+        }
+    }
+
+    // Opción 2 del menú: crear fruta
+    private void manejarCrearFruta(java.util.Scanner sc) {
+        System.out.println("---- Crear FRUTA ----");
+
+        // 1) Evento
+        Evento evento = leerEvento(sc);
+        if (evento == null) return;
+        // Validar que el evento tenga al menos un cliente activo
+        if (!tieneClientesEnEvento(evento)) {
+            System.out.println("  [ADMIN] No hay clientes activos en " + evento +
+                            ". No se crearán frutas en este juego.");
+            return;
+        }
+
+        // 2) Liana
+        System.out.print("  Liana (0.." + (LayoutDKJr.getCantidadLianas() - 1) + "): ");
+        String lineaL = sc.nextLine().trim();
+        int liana;
+        try {
+            liana = Integer.parseInt(lineaL);
+        } catch (NumberFormatException e) {
+            System.out.println("  [ADMIN] Error: la liana debe ser numérica.");
+            return;
+        }
+        if (liana < 0 || liana >= LayoutDKJr.getCantidadLianas()) {
+            System.out.println("  [ADMIN] Error: liana fuera de rango.");
+            return;
+        }
+
+        // 3) Altura
+        System.out.println("  Altura en la liana:");
+        System.out.println("    0) Arriba");
+        System.out.println("    1) Medio");
+        System.out.println("    2) Abajo");
+        System.out.print("  Opción: ");
+        String lineaAlt = sc.nextLine().trim();
+        int altura;
+        try {
+            altura = Integer.parseInt(lineaAlt);
+        } catch (NumberFormatException e) {
+            System.out.println("  [ADMIN] Error: altura debe ser 0, 1 o 2.");
+            return;
+        }
+        if (altura < 0 || altura > 2) {
+            System.out.println("  [ADMIN] Error: altura inválida (0, 1, 2).");
+            return;
+        }
+
+        // 4) Puntos
+        System.out.print("  Puntos de la fruta: ");
+        String lineaPts = sc.nextLine().trim();
+        int puntos;
+        try {
+            puntos = Integer.parseInt(lineaPts);
+        } catch (NumberFormatException e) {
+            System.out.println("  [ADMIN] Error: los puntos deben ser numéricos.");
+            return;
+        }
+
+        crearFrutaComoAdmin(evento, liana, altura, puntos);
+    }
+
+    // Opción 3 del menú: eliminar fruta
+    private void manejarEliminarFruta(Scanner sc) {
+        System.out.println("---- Eliminar FRUTA ----");
+
+        // 1) Evento
+        Evento evento = leerEvento(sc);
+        if (evento == null) return;
+        // Validar que el evento tenga al menos un cliente activo
+        if (!tieneClientesEnEvento(evento)) {
+            System.out.println("  [ADMIN] No hay clientes activos en " + evento +
+                            ". No se eliminarán frutas en este juego (estado inactivo).");
+            return;
+        }
+
+        // 2) Liana
+        int maxLianas = LayoutDKJr.getCantidadLianas() - 1;
+        int liana = leerEnteroEnRango(sc, 
+                "  Liana", 
+                0, 
+                maxLianas);
+
+        // 3) Altura
+        System.out.println("  Altura en la liana:");
+        System.out.println("    0) Arriba");
+        System.out.println("    1) Medio");
+        System.out.println("    2) Abajo");
+        int altura = leerEnteroEnRango(sc, 
+                "  Opción de altura", 
+                0, 
+                2);
+
+        // 4) Ejecutar eliminación
+        eliminarFrutaComoAdmin(evento, liana, altura);
+    }
+
+    // Opción 4 del menú: ver mapa lógico (como imagen)
+    private void manejarMostrarMapa() {
+        System.out.println("[ADMIN] Abriendo mapa lógico...");
+
+        try {
+            // Verificar si Desktop está soportado
+            if (!java.awt.Desktop.isDesktopSupported()) {
+                System.out.println("[ADMIN] Desktop no soportado en este sistema. Mostrando mapa en consola.");
+                printMap();
+                return;
+            }
+
+            java.awt.Desktop desktop = java.awt.Desktop.getDesktop();
+            if (!desktop.isSupported(java.awt.Desktop.Action.OPEN)) {
+                System.out.println("[ADMIN] Acción OPEN no soportada. Mostrando mapa en consola.");
+                printMap();
+                return;
+            }
+
+            // Archivo de la imagen
+            java.io.File imgFile = new java.io.File(MAP_IMAGE_PATH);
+            if (!imgFile.exists()) {
+                System.out.println("[ADMIN] Imagen de mapa no encontrada:");
+                System.out.println("        " + imgFile.getAbsolutePath());
+                System.out.println("        (usa printMap() como referencia por ahora)");
+                printMap();
+                return;
+            }
+
+            // Abrir la imagen con el visor predeterminado del SO
+            desktop.open(imgFile);
+            System.out.println("[ADMIN] Imagen del mapa abierta: " + imgFile.getAbsolutePath());
+
+        } catch (Exception e) {
+            System.out.println("[ADMIN] Error al abrir la imagen del mapa: " + e.getMessage());
+            System.out.println("[ADMIN] Mostrando mapa lógico en texto como respaldo.");
+            printMap();
+        }
+    }
+
 
     /**
      * Crear enemigo desde la consola del admin.
      * Recibe el evento, el tipo de enemigo y la ubicación lógica.
      */
     public void crearEnemigoComoAdmin(Evento evento, String tipo, int liana, int plataforma) {
+        GestorJuego gestorEvento = gestores.get(evento);
+        if (gestorEvento == null) {
+            System.out.println("[ADMIN] No existe GestorJuego para " + evento);
+            return;
+        }
+
         float x;
         float y;
         String tipoFinal = tipo;
@@ -337,7 +701,7 @@ public class GameServer {
             LayoutDKJr.LianaDef l = LayoutDKJr.getLiana(liana);
             x = l.x;
             y = LayoutDKJr.getYTopLiana(liana);
-            tipoFinal = "CROC_BLUE_LIANA"; // si querés ser más explícito
+            tipoFinal = "CROC_BLUE_LIANA";
         } else {
             if (plataforma >= 0) {
                 // ROJO EN PLATAFORMA
@@ -354,7 +718,7 @@ public class GameServer {
             }
         }
 
-        gestor.crearEnemigo(tipoFinal, x, y);
+        gestorEvento.crearEnemigo(tipoFinal, x, y);
 
         Paquete p = Paquete.crearEnemigo("ADMIN", tipoFinal, x, y);
         notifyByEvento(evento, p);
@@ -364,26 +728,59 @@ public class GameServer {
                         ") -> (" + x + ", " + y + ")");
     }
 
-
-    
     /**
      * Crear fruta desde la consola del admin.
      */
     public void crearFrutaComoAdmin(Evento evento, int liana, int alturaIndex, int puntos) {
+        GestorJuego gestorEvento = gestores.get(evento);
+        if (gestorEvento == null) {
+            System.out.println("[ADMIN] No existe GestorJuego para " + evento);
+            return;
+        }
+
         float x = LayoutDKJr.getXForLiana(liana);
         float y = LayoutDKJr.getYOnLiana(liana, alturaIndex);
 
-        // 1) Crear en el gestor
-        gestor.crearFruta(x, y, puntos);
+        // 1) Crear en el gestor de ESTE evento
+        gestorEvento.crearFruta(x, y, puntos);
 
         // 2) Notificar a los clientes de ese evento
         Paquete p = Paquete.crearFruta("ADMIN", x, y, puntos);
         notifyByEvento(evento, p);
 
         System.out.println("[ADMIN] Fruta creada en " + evento +
-                           " (liana=" + liana + ", altura=" + alturaIndex +
-                           ", puntos=" + puntos + ") -> (" + x + ", " + y + ")");
+                        " (liana=" + liana + ", altura=" + alturaIndex +
+                        ", puntos=" + puntos + ") -> (" + x + ", " + y + ")");
     }
+
+    /**
+     * Elimina una fruta desde la consola del admin.
+     */
+    public void eliminarFrutaComoAdmin(Evento evento, int liana, int alturaIndex) {
+        GestorJuego gestorEvento = gestores.get(evento);
+        if (gestorEvento == null) {
+            System.out.println("[ADMIN] No existe GestorJuego para " + evento);
+            return;
+        }
+
+        float x = LayoutDKJr.getXForLiana(liana);
+        float y = LayoutDKJr.getYOnLiana(liana, alturaIndex);
+
+        // Elimina en el gestor de ESTE evento (usa una tolerancia pequeña en píxeles)
+        boolean ok = gestorEvento.eliminarFrutaPorPosicion(x, y, 5.0f);
+
+        if (ok) {
+            System.out.println("[ADMIN] Fruta ELIMINADA en " + evento +
+                    " (liana=" + liana + ", altura=" + alturaIndex +
+                    ") -> (" + x + ", " + y + ")");
+        } else {
+            System.out.println("[ADMIN] No se encontró fruta para eliminar en " + evento +
+                    " (liana=" + liana + ", altura=" + alturaIndex +
+                    ") -> (" + x + ", " + y + ")");
+        }
+        // No hace falta mandar paquete especial: el próximo ESTADO_JUEGO ya vendrá sin esa fruta
+    }
+
 
     /**
      * Inicia un hilo que permite a un usuario administrador crear
@@ -391,108 +788,69 @@ public class GameServer {
      */
     private void startAdminConsole() {
         Thread adminThread = new Thread(() -> {
-            java.util.Scanner sc = new java.util.Scanner(System.in);
+            Scanner sc = new Scanner(System.in);
 
             System.out.println("===========================================");
             System.out.println("[ADMIN] Consola de administración iniciada");
-            System.out.println("Comandos disponibles:");
-            System.out.println("  enemigo - crear cocodrilo (rojo/azul)");
-            System.out.println("  fruta   - crear fruta");
-            System.out.println("  map     - mostrar mapa lógico (lianas/plataformas)");
-            System.out.println("  ayuda   - mostrar comandos");
-            System.out.println("  salir   - terminar consola admin (no apaga el server)");
             System.out.println("===========================================");
 
-            while (true) {
-                System.out.print("[ADMIN] > ");
-                String cmd = sc.nextLine().trim().toLowerCase();
+            boolean seguir = true;
 
-                if (cmd.equals("salir")) {
-                    System.out.println("[ADMIN] Consola de administración finalizada.");
-                    break;
-                }
+            while (seguir) {
+                System.out.println();
+                System.out.println("========= MENÚ ADMIN =========");
+                System.out.println("  1) Crear enemigo");
+                System.out.println("  2) Crear fruta");
+                System.out.println("  3) Eliminar fruta");
+                System.out.println("  4) Ver mapa lógico (lianas/plataformas)");
+                System.out.println("  5) Ayuda / Descripción");
+                System.out.println("  0) Salir de consola admin");
+                System.out.println("================================");
 
-                if (cmd.equals("ayuda")) {
-                    System.out.println("Comandos:");
-                    System.out.println("  enemigo - crear cocodrilo (rojo/azul)");
-                    System.out.println("  fruta   - crear fruta");
-                    System.out.println("  map     - mostrar mapa lógico (lianas/plataformas)");
-                    System.out.println("  salir   - salir de la consola admin");
-                    continue;
-                }
+                int opcion = leerEnteroEnRango(sc, "[ADMIN] Opción", 0, 5);
 
-                if (cmd.equals("map")) {
-                    printMap();
-                    continue;
-                }
+                switch (opcion) {
+                    case 0:
+                        System.out.println("[ADMIN] Consola de administración finalizada.");
+                        seguir = false;
+                        break;
 
-                if (cmd.equals("enemigo")) {
-                    try {
-                        System.out.print("  Tipo (CROC_RED/CROC_BLUE): ");
-                        String tipo = sc.nextLine().trim();
-
-                        System.out.print("  Evento (1 = JUEGO_1, 2 = JUEGO_2): ");
-                        int idxEv = Integer.parseInt(sc.nextLine().trim()) - 1;
-                        Evento evento = Evento.fromIndex(idxEv);
-
-                        int liana = -1;
-                        int plataforma = -1;
-
-                        if ("CROC_BLUE".equalsIgnoreCase(tipo)) {
-                            // SOLO liana
-                            System.out.print("  Liana (0,1,2,...): ");
-                            liana = Integer.parseInt(sc.nextLine().trim());
-                            plataforma = -1; // no aplica
-
-                        } else { // CROC_RED
-                            System.out.print("  ¿Dónde? (1 = liana, 2 = plataforma): ");
-                            int destino = Integer.parseInt(sc.nextLine().trim());
-
-                            if (destino == 1) {
-                                System.out.print("  Liana (0,1,2,...): ");
-                                liana = Integer.parseInt(sc.nextLine().trim());
-                                plataforma = -1; // no aplica
-                            } else {
-                                System.out.print("  Plataforma (0,1,2,...): ");
-                                plataforma = Integer.parseInt(sc.nextLine().trim());
-                                // la liana no se usa cuando plataforma >= 0,
-                                // pero ponemos algún valor válido por si acaso
-                                liana = 0;
-                            }
+                    case 1:
+                        try {
+                            manejarCrearEnemigo(sc);
+                        } catch (Exception e) {
+                            System.out.println("[ADMIN] Error creando enemigo: " + e.getMessage());
                         }
+                        break;
 
-                        crearEnemigoComoAdmin(evento, tipo, liana, plataforma);
+                    case 2:
+                        try {
+                            manejarCrearFruta(sc);
+                        } catch (Exception e) {
+                            System.out.println("[ADMIN] Error creando fruta: " + e.getMessage());
+                        }
+                        break;
 
-                    } catch (Exception e) {
-                        System.out.println("[ADMIN] Error leyendo datos de enemigo: " + e.getMessage());
-                    }
-                    continue;
+                    case 3:
+                        try {
+                            manejarEliminarFruta(sc);
+                        } catch (Exception e) {
+                            System.out.println("[ADMIN] Error eliminando fruta: " + e.getMessage());
+                        }
+                        break;
+
+                    case 4:
+                        manejarMostrarMapa();
+                        break;
+
+                    case 5:
+                        System.out.println("Descripción rápida:");
+                        System.out.println("  - Enemigos ROJOS: suben y bajan en una liana o caminan en una plataforma.");
+                        System.out.println("  - Enemigos AZULES: bajan por una liana y se caen.");
+                        System.out.println("  - Frutas: se crean en liana + altura y dan puntos.");
+                        System.out.println("  - Eliminar fruta: usa la misma liana + altura donde fue creada.");
+                        break;
                 }
-
-                if (cmd.equals("fruta")) {
-                    try {
-                        System.out.print("  Evento (1 = JUEGO_1, 2 = JUEGO_2): ");
-                        int idxEv = Integer.parseInt(sc.nextLine().trim()) - 1;
-                        Evento evento = Evento.fromIndex(idxEv);
-
-                        System.out.print("  Liana (0,1,2,...): ");
-                        int liana = Integer.parseInt(sc.nextLine().trim());
-
-                        System.out.print("  Altura en la liana (0 = arriba, 1 = medio, 2 = abajo): ");
-                        int altura = Integer.parseInt(sc.nextLine().trim());
-
-                        System.out.print("  Puntos de la fruta: ");
-                        int puntos = Integer.parseInt(sc.nextLine().trim());
-
-                        crearFrutaComoAdmin(evento, liana, altura, puntos);
-
-                    } catch (Exception e) {
-                        System.out.println("[ADMIN] Error leyendo datos de fruta: " + e.getMessage());
-                    }
-                    continue;
-                }
-
-                System.out.println("[ADMIN] Comando desconocido. Escribe 'ayuda' para ver opciones.");
             }
         });
 

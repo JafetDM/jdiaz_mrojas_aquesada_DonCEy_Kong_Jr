@@ -9,12 +9,18 @@ public class Fruta implements ElementoJuego {
     private final float x;
     private final float y;
     private final int puntos;
+    private final String tipo;
+    private static final String[] TIPOS_FRUTA = { "MANGO", "BANANO", "MANZANA" };
 
     public Fruta(float x, float y, int puntos) {
         this.id = SIGUIENTE_ID++;
         this.x = x;
         this.y = y;
         this.puntos = puntos;
+
+        // Elegir tipo aleatorio
+        int idx = (int)(Math.random() * TIPOS_FRUTA.length);
+        this.tipo = TIPOS_FRUTA[idx];
     }
 
     @Override
@@ -27,6 +33,10 @@ public class Fruta implements ElementoJuego {
     public float getY() { return y; }
 
     public int getPuntos() { return puntos; }
+
+    public String getTipoFruta() {
+        return tipo;
+    }
 
     @Override
     public void actualizar(float dt) {

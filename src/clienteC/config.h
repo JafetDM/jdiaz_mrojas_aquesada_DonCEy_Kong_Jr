@@ -22,7 +22,7 @@
 // Rutas de Assets
 // ========================
 
-#define PLAYER_TEXTURE_PATH "assets/dk.jpg"
+#define PLAYER_TEXTURE_PATH "assets/dk_jr.png"
 #define STAGE_TEXTURE_PATH "assets/stage.png"
 
 // ========================

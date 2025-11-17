@@ -92,6 +92,7 @@ public class GameState {
         public float x;
         public float y;
         public float velocidad;
+        public String direccion;
     }
 
     public static class FruitState {
@@ -100,6 +101,7 @@ public class GameState {
         public float y;
         public int puntos;
         public boolean recolectada;
+        public String tipo;
     }
     
     // Actualiza la lista de enemigos y frutas
@@ -119,6 +121,7 @@ public class GameState {
                 es.x = en.getX();
                 es.y = en.getY();
                 es.velocidad = en.velocidad; // protegido, pero mismo paquete
+                es.direccion = en.getDireccion();
 
                 enemigos.add(es);
 
@@ -131,6 +134,7 @@ public class GameState {
                 fs.y = fr.getY();
                 fs.puntos = fr.getPuntos();
                 fs.recolectada = false; // por ahora siempre false
+                fs.tipo = fr.getTipoFruta();
 
                 frutas.add(fs);
             }
