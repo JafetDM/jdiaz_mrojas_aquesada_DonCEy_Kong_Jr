@@ -123,6 +123,7 @@ public class GestorJuego {
         elementos.add(fabrica.crearEnemigo(tipo, x, y));
     }
 
+    //METODOS PARA FRUTAS
     public void crearFruta(float x, float y, int puntos) {
         elementos.add(fabrica.crearFruta(x, y, puntos));
     }
@@ -151,7 +152,34 @@ public class GestorJuego {
         return eliminada;
     }
 
+    /**
+     * Intenta recolectar una fruta cercana a (x, y).
+     * Elimina la fruta de la lista de elementos si la encuentra.
+     * @return puntos de la fruta recolectada, o 0 si no había ninguna en rango.
+     */
+    public int recolectarFruta(float x, float y, float tolerancia) {
+        Iterator<ElementoJuego> it = elementos.iterator();
+        while (it.hasNext()) {
+            ElementoJuego e = it.next();
+            if (e instanceof Fruta) {
+                Fruta f = (Fruta) e;
 
+                float dx = f.getX() - x;
+                float dy = f.getY() - y;
+                float dist2 = dx * dx + dy * dy;
+
+                if (dist2 <= tolerancia * tolerancia) {
+                    int puntos = f.getPuntos();
+                    it.remove();     // la fruta desaparece del mundo
+                    return puntos;   // devolvemos los puntos de ESTA fruta
+                }
+            }
+        }
+        // No había ninguna fruta en ese rango
+        return 0;
+    }
+
+    // Actualiza todos los elementos del juego
     public void actualizar(float dt) {
         Iterator<ElementoJuego> it = elementos.iterator();
         while (it.hasNext()) {

@@ -4,6 +4,7 @@ import java.io.*;
 import java.net.*;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * GameServer - Gestor de múltiples Publishers (EventPublisher)
@@ -41,6 +42,9 @@ public class GameServer {
 
     // ========== PATRÓN OBSERVER: Map de Publishers por Evento ==========
     private final Map<Evento, EventPublisher> publishers = new HashMap<>();
+
+    // Cooldown de daño por enemigo para cada jugador (en milisegundos)
+    private final Map<String, Long> ultimoGolpeEnemigo = new ConcurrentHashMap<>();
     
     public GameServer(int port) {
         this.port = port;
@@ -162,16 +166,36 @@ public class GameServer {
                 ClientHandler handler = new ClientHandler(clientSocket, playerName, evento, this);
                 clients.add(handler);
                 subscribe(handler);
-                
+
+                // Posición inicial DK Jr en plataforma 0
+                EventPublisher publisher = publishers.get(evento);
+                if (publisher != null) {
+                    GameState gameState = publisher.getGameState();
+                    if (gameState != null) {
+                        // Plataforma 0 -> lo ponemos en el centro de esa plataforma
+                        LayoutDKJr.PlataformaDef p0 = LayoutDKJr.getPlataforma(0);
+                        float spawnX = LayoutDKJr.getXCentroPlataforma(0);
+                        float spawnY = p0.y - 20.0f;  // un poquito encima de la plataforma
+
+                        // Registrar al jugador en el estado del juego de este evento
+                        gameState.actualizarJugador(playerName, spawnX, spawnY);
+
+                        // Mandar al cliente su posición inicial inmediata
+                        Paquete spawn = new Paquete("MOVIMIENTO", playerName, spawnX, spawnY);
+                        handler.sendPacket(spawn);
+                    }
+                }
+
                 // Iniciar thread del handler PRIMERO
                 new Thread(handler).start();
-                
+
                 // LUEGO enviar mensaje de bienvenida
                 Paquete bienvenida = new Paquete("BIENVENIDA", "Server", 0, 0);
                 bienvenida.datos = "Bienvenido " + playerName + " al " + evento;
                 handler.update(bienvenida);
-                
+
                 System.out.println("✓ " + playerName + " listo en " + evento);
+
             }
             
         } catch (IOException e) {
@@ -284,10 +308,89 @@ public class GameServer {
         // Procesar según el tipo de paquete
         switch (paquete.tipo) {
             case "MOVIMIENTO":
-                // Actualizar posición del jugador en el GameState
+                // 1) Actualizar posición del jugador en el GameState
                 gameState.actualizarJugador(paquete.playerName, paquete.x, paquete.y);
 
-                // Notificar a todos los subscribers del mismo evento
+                // 2) Revisar colisión jugador-fruta en el GestorJuego de ESTE evento
+                {
+                    final float TOLERANCIA_FRUTA = 18.0f; // píxeles, ajústalo si hace falta
+
+                    int puntosGanados = gestorEvento.recolectarFruta(
+                            paquete.x,
+                            paquete.y,
+                            TOLERANCIA_FRUTA
+                    );
+
+                    if (puntosGanados > 0) {
+                        // Actualizar los puntos del jugador en el GameState
+                        gameState.sumarPuntosAJugador(paquete.playerName, puntosGanados);
+
+                        // (Opcional) Notificar a los clientes que se recogió una fruta
+                        Paquete pCol = new Paquete("FRUTA_RECOLECTADA",
+                                                   paquete.playerName,
+                                                   paquete.x,
+                                                   paquete.y);
+                        pCol.puntos = puntosGanados;
+                        publisher.notifySubscribers(pCol);
+
+                        System.out.println("[COLISION] " + paquete.playerName +
+                                " recolectó fruta en " + evento +
+                                " (+" + puntosGanados + " pts)");
+                    }
+                }
+
+                // 3) COLISIÓN JUGADOR–ENEMIGO
+                {
+                    final float TOLERANCIA_ENEMIGO = 20.0f; // píxeles, ajústalo al tamaño del sprite
+                    final long COOLDOWN_MS = 500;          // 1 segundo entre golpes
+
+                    long ahora = System.currentTimeMillis();
+                    Long ultimoGolpe = ultimoGolpeEnemigo.get(paquete.playerName);
+                    boolean puedeSerGolpeado = (ultimoGolpe == null) ||
+                                               (ahora - ultimoGolpe >= COOLDOWN_MS);
+
+                    if (puedeSerGolpeado) {
+                        // Revisar distancia a todos los enemigos de ESTE evento
+                        boolean golpeado = false;
+
+                        List<ElementoJuego> elementos = gestorEvento.obtenerElementos();
+                        for (ElementoJuego elem : elementos) {
+                            if (elem instanceof Enemigo) {
+                                Enemigo en = (Enemigo) elem;
+
+                                float dx = en.getX() - paquete.x;
+                                float dy = en.getY() - paquete.y;
+                                float dist2 = dx * dx + dy * dy;
+
+                                if (dist2 <= TOLERANCIA_ENEMIGO * TOLERANCIA_ENEMIGO) {
+                                    golpeado = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (golpeado) {
+                            // Actualizar vidas en GameState
+                            gameState.restarVidaAJugador(paquete.playerName, 1);
+                            ultimoGolpeEnemigo.put(paquete.playerName, ahora);
+
+                            // Paquete opcional para que el cliente sepa que fue golpeado
+                            Paquete pGolpe = new Paquete("JUGADOR_HERIDO",
+                                                         paquete.playerName,
+                                                         paquete.x,
+                                                         paquete.y);
+                            // Podrías agregar info extra si querés:
+                            pGolpe.datos = "ENEMIGO";
+
+                            publisher.notifySubscribers(pGolpe);
+
+                            System.out.println("[DAÑO] " + paquete.playerName +
+                                    " fue golpeado por un enemigo en " + evento);
+                        }
+                    }
+                }
+
+                // 4) Notificar movimiento a los demás jugadores (posición actual)
                 publisher.notifySubscribers(paquete);
                 break;
 

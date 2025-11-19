@@ -1,8 +1,18 @@
 // cliente.c - Adaptado para comunicarse con servidor Java usando Paquete y GameState
-#define PLAYER_SCALE 0.3f   // 30% del tamaño original
-#define FRUIT_SCALE  0.2f   // 20%
-#define ENEMY_TARGET_SIZE 32.0f
+ 
+// Escalas para renderizado
+#define PLAYER_SCALE 0.3f   
+#define FRUIT_SCALE  0.2f   
+#define ENEMY_TARGET_SIZE_RED   40.0f
+#define ENEMY_TARGET_SIZE_BLUE  42.0f 
 
+// Física del juego
+#define GRAVITY    900.0f   // píxeles / s^2
+#define MOVE_SPEED 220.0f   // píxeles / s
+#define JUMP_SPEED -420.0f  // píxeles / s (negativo = hacia arriba)
+
+// Librerías estándar
+#include <math.h> 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,6 +22,7 @@
 #include <stdbool.h>
 #include <errno.h>
 
+// Librerías externas
 #include "raylib.h"
 #include "librerias/cJSON.h"
 #include "config.h"
@@ -65,7 +76,7 @@ typedef struct {
 } GameState;
 
 // ========================
-// Forward declarations (declaraciones adelantadas)
+// Declaraciones adelantadas
 // ========================
 static void parse_game_state_json(const char *jsonText);
 static void parse_paquete_json(const char *jsonText);
@@ -78,6 +89,13 @@ static volatile bool g_running = true;
 static pthread_mutex_t g_send_mutex = PTHREAD_MUTEX_INITIALIZER;
 static char g_playerName[64] = "ClienteC";
 static char g_eventoAsignado[32] = "";
+
+// Física del jugador local (lado cliente)
+static float g_playerX = 0.0f;
+static float g_playerY = 0.0f;
+static float g_playerVy = 0.0f;     // velocidad vertical
+static bool  g_playerGrounded = false;
+static bool  g_playerInitialized = false;
 
 // Texturas globales
 static Texture2D g_playerTex = {0};
@@ -161,15 +179,33 @@ static void parse_paquete_json(const char *jsonText) {
         if (datos && cJSON_IsString(datos)) {
             printf("[SERVER] %s\n", datos->valuestring);
             
-            // Extraer evento asignado del mensaje
-            // "Bienvenido ClienteC al JUEGO_1"
             const char *msg = datos->valuestring;
+
+            // ===== Evento asignado =====
             if (strstr(msg, "JUEGO_1")) {
                 strcpy(g_eventoAsignado, "JUEGO_1");
             } else if (strstr(msg, "JUEGO_2")) {
                 strcpy(g_eventoAsignado, "JUEGO_2");
             }
             printf("[INFO] Asignado a: %s\n", g_eventoAsignado);
+
+            // ===== Nombre de jugador asignado por el servidor =====
+            // Mensaje tipo: "Bienvenido Jugador1 al JUEGO_1"
+            const char *inicio = strstr(msg, "Bienvenido ");
+            if (inicio) {
+                inicio += strlen("Bienvenido ");  // saltar "Bienvenido "
+                const char *fin = strstr(inicio, " al ");
+                size_t len = fin ? (size_t)(fin - inicio) : strlen(inicio);
+
+                if (len >= sizeof(g_playerName)) {
+                    len = sizeof(g_playerName) - 1;
+                }
+
+                memcpy(g_playerName, inicio, len);
+                g_playerName[len] = '\0';
+
+                printf("[INFO] Nombre jugador asignado por server: %s\n", g_playerName);
+            }
         }
     }
     else if (strcmp(tipoStr, "MOVIMIENTO") == 0) {
@@ -494,53 +530,127 @@ static void *network_thread(void *arg) {
     return NULL;
 }
 
+// Calcula tamaño "de pies" del DK Jr basado en la textura
+static float get_player_half_height(void) {
+    if (g_playerTex.id != 0) {
+        float h = (float)g_playerTex.height * PLAYER_SCALE;
+        return h * 0.5f;
+    }
+    return 24.0f; // valor por defecto
+}
+
+// Colocar al jugador sobre la plataforma 0 al inicio
+static void init_player_start_position(void) {
+    if (g_playerInitialized) return;
+
+    const PlataformaDef *floor = &PLATAFORMAS[0];
+
+    float halfH = get_player_half_height();
+
+    g_playerX = (floor->xLeft + floor->xRight) * 0.5f;  // centro de la plataforma
+    g_playerY = floor->y - halfH;                       // pies justo sobre la plataforma
+    g_playerVy = 0.0f;
+    g_playerGrounded = true;
+    g_playerInitialized = true;
+
+    // Mandar posición inicial al servidor
+    send_paquete("MOVIMIENTO", "QUIETO", g_playerX, g_playerY);
+}
+
+// Resolver colisión con todas las plataformas
+static void resolver_colision_plataformas(void) {
+    if (!g_playerInitialized) return;
+
+    float halfH = get_player_half_height();
+    float feetY = g_playerY + halfH;
+
+    g_playerGrounded = false;
+    const float tolerancia = 6.0f;  // rango para "aterrizar" en la plataforma
+
+    for (int i = 0; i < NUM_PLATAFORMAS; i++) {
+        const PlataformaDef *p = &PLATAFORMAS[i];
+
+        // ¿Estamos horizontalmente sobre la plataforma?
+        if (g_playerX < p->xLeft || g_playerX > p->xRight) {
+            continue;
+        }
+
+        float platY = p->y;
+
+        // Solo colisionamos si venimos cayendo (vy >= 0)
+        if (g_playerVy >= 0.0f &&
+            feetY >= platY - tolerancia &&
+            feetY <= platY + tolerancia) {
+
+            // Ajustar al jugador para que quede "parado" justo sobre la plataforma
+            g_playerY = platY - halfH;
+            g_playerVy = 0.0f;
+            g_playerGrounded = true;
+            break;
+        }
+    }
+}
+
 // -------------------------
-// Enviar input del teclado
+// Enviar input del teclado + física del jugador
 // -------------------------
 static void send_input_from_keys(void) {
-    static float player_x = SCREEN_WIDTH / 2.0f;
-    static float player_y = SCREEN_HEIGHT - 50.0f;
-    static float speed = 5.0f;
-    
-    const char *movimiento = NULL;
-    bool moved = false;
-    
+    // Asegurar que el jugador tenga posición inicial sobre la plataforma 0
+    init_player_start_position();
+
+    float dt = GetFrameTime();
+    if (dt <= 0.0f) dt = 1.0f / 60.0f;
+
+    float dx = 0.0f;
+    const char *movimiento = "QUIETO";
+
+    // Movimiento lateral
     if (IsKeyDown(KEY_RIGHT)) {
-        player_x += speed;
+        dx += MOVE_SPEED * dt;
         movimiento = "DERECHA";
-        moved = true;
     }
     if (IsKeyDown(KEY_LEFT)) {
-        player_x -= speed;
+        dx -= MOVE_SPEED * dt;
         movimiento = "IZQUIERDA";
-        moved = true;
     }
-    if (IsKeyDown(KEY_UP)) {
-        player_y -= speed;
+
+    // Salto (espacio) solo si está en el suelo
+    if (IsKeyPressed(KEY_SPACE) && g_playerGrounded) {
+        g_playerVy = JUMP_SPEED;
+        g_playerGrounded = false;
         movimiento = "ARRIBA";
-        moved = true;
     }
-    if (IsKeyDown(KEY_DOWN)) {
-        player_y += speed;
-        movimiento = "ABAJO";
-        moved = true;
+
+    // Física vertical: gravedad
+    g_playerVy += GRAVITY * dt;
+    g_playerY  += g_playerVy * dt;
+
+    // Movimiento horizontal
+    g_playerX += dx;
+
+    // Limitar a la pantalla
+    if (g_playerX < 0) g_playerX = 0;
+    if (g_playerX > SCREEN_WIDTH) g_playerX = SCREEN_WIDTH;
+
+    // Colisión con plataformas
+    resolver_colision_plataformas();
+
+    // Enviar al servidor solo si la posición cambió
+    static float lastX = 0.0f;
+    static float lastY = 0.0f;
+    static bool firstSend = true;
+
+    if (firstSend ||
+        fabsf(g_playerX - lastX) > 0.1f ||
+        fabsf(g_playerY - lastY) > 0.1f) {
+
+        send_paquete("MOVIMIENTO", movimiento, g_playerX, g_playerY);
+        lastX = g_playerX;
+        lastY = g_playerY;
+        firstSend = false;
     }
-    if (IsKeyPressed(KEY_L)) {
-        g_showLayoutDebug = !g_showLayoutDebug;
-    }
-    
-    // Limitar a pantalla
-    if (player_x < 0) player_x = 0;
-    if (player_x > SCREEN_WIDTH) player_x = SCREEN_WIDTH;
-    if (player_y < 0) player_y = 0;
-    if (player_y > SCREEN_HEIGHT) player_y = SCREEN_HEIGHT;
-    
-    // Solo enviar si hubo movimiento
-    if (moved) {
-        send_paquete("MOVIMIENTO", movimiento, player_x, player_y);
-    }
-    
 }
+
 
 // -------------------------
 // Renderizar estado del juego
@@ -614,15 +724,20 @@ static void render_game(Texture2D stageTex) {
         if (tex.id != 0) {
             Rectangle src = { 0, 0, (float)tex.width, (float)tex.height };
 
-            // Escala automática para que TODOS los cocodrilos tengan tamaño parecido
             float texW = (float)tex.width;
             float texH = (float)tex.height;
 
             // Usamos la dimensión mayor para mantener proporción sin deformar
             float mayor = (texW > texH) ? texW : texH;
 
-            // Qué tanto hay que escalar para que "mayor" pase a ser ENEMY_TARGET_SIZE
-            float scale = ENEMY_TARGET_SIZE / mayor;
+            // Tamaño objetivo distinto según si es rojo o azul
+            float targetSize = ENEMY_TARGET_SIZE_RED; // por defecto rojo
+            if (isBlue) {
+                targetSize = ENEMY_TARGET_SIZE_BLUE;
+            }
+
+            // Escala para que "mayor" pase a ser targetSize
+            float scale = targetSize / mayor;
 
             float w = texW * scale;
             float h = texH * scale;

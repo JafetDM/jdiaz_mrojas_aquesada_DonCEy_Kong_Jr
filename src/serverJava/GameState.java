@@ -53,6 +53,32 @@ public class GameState {
 
         this.timestamp = System.currentTimeMillis();
     }
+
+    /**
+     * Suma puntos al jugador indicado, si existe.
+     */
+    public void sumarPuntosAJugador(String playerName, int puntos) {
+        if (puntos <= 0) return;
+
+        PlayerState p = jugadores.get(playerName);
+        if (p != null) {
+            p.puntos += puntos;
+            this.timestamp = System.currentTimeMillis();
+        }
+    }
+
+    /**
+     * Resta vidas al jugador indicado, si existe.
+     */
+    public void restarVidaAJugador(String playerName, int cantidad) {
+        if (cantidad <= 0) return;
+
+        PlayerState p = jugadores.get(playerName);
+        if (p != null) {
+            p.vida = Math.max(0, p.vida - cantidad);
+            this.timestamp = System.currentTimeMillis();
+        }
+    }
     
     /**
      * Obtiene los datos de un jugador
