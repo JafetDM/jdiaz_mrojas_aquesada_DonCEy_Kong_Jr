@@ -9,7 +9,7 @@
 // Física del juego
 #define GRAVITY    900.0f   // píxeles / s^2
 #define MOVE_SPEED 220.0f   // píxeles / s
-#define JUMP_SPEED -420.0f  // píxeles / s (negativo = hacia arriba)
+#define JUMP_SPEED -320.0f  // píxeles / s (negativo = hacia arriba)
 
 // Librerías estándar
 #include <math.h> 
@@ -665,6 +665,10 @@ static void render_game(Texture2D stageTex) {
         Rectangle dst = {0, 0, (float)SCREEN_WIDTH, (float)SCREEN_HEIGHT};
         DrawTexturePro(stageTex, src, dst, (Vector2){0,0}, 0.0f, WHITE);
     }
+
+    // Variables de HUD (vidas/puntos del jugador local)
+    int vidaLocal = -1;
+    int puntosLocal = 0;
     
     pthread_mutex_lock(&g_state.mutex);
     
@@ -673,15 +677,36 @@ static void render_game(Texture2D stageTex) {
         Player *p = &g_state.jugadores[i];
         
         if (strcmp(p->playerName, g_playerName) == 0 && g_playerTex.id != 0) {
+            // Soy yo -> sprite de DK Jr
             Rectangle src = { 0, 0, (float)g_playerTex.width, (float)g_playerTex.height };
 
             float w = g_playerTex.width  * PLAYER_SCALE;
             float h = g_playerTex.height * PLAYER_SCALE;
 
             Rectangle dst = { p->x, p->y, w, h };
-            Vector2 origin = { w / 2.0f, h / 2.0f };   // ojo: mitad del tamaño escalado
+            Vector2 origin = { w / 2.0f, h / 2.0f };   // mitad del tamaño escalado
 
             DrawTexturePro(g_playerTex, src, dst, origin, 0.0f, WHITE);
+
+            // ======== HUD local ========
+            vidaLocal   = p->vida;
+            puntosLocal = p->puntos;
+
+            // ======== SYNC SOLO EN RESPAWN REAL ========
+            float dx = fabsf(p->x - g_playerX);
+            float dy = fabsf(p->y - g_playerY);
+
+            // Solo consideramos “respawn” si la diferencia en Y es grande
+            if (dy > 40.0f) {
+                g_playerX = p->x;
+                g_playerY = p->y;
+
+                g_playerVy = 0.0f;
+                g_playerGrounded = true;
+
+                printf("[SYNC] Respawn detectado -> corrigiendo posición local\n");
+            }
+
         } else {
             // Otros jugadores como círculo por ahora
             Color color = GREEN;
@@ -695,7 +720,7 @@ static void render_game(Texture2D stageTex) {
     for (int i = 0; i < g_state.totalEnemigos; i++) {
         Enemy *e = &g_state.enemigos[i];
 
-        Texture2D tex = {0};
+        Texture2D tex = (Texture2D){0};
 
         bool isRed  = (strncmp(e->tipo, "CROC_RED", 8)  == 0);
         bool isBlue = (strncmp(e->tipo, "CROC_BLUE", 9) == 0);
@@ -727,16 +752,13 @@ static void render_game(Texture2D stageTex) {
             float texW = (float)tex.width;
             float texH = (float)tex.height;
 
-            // Usamos la dimensión mayor para mantener proporción sin deformar
             float mayor = (texW > texH) ? texW : texH;
 
-            // Tamaño objetivo distinto según si es rojo o azul
             float targetSize = ENEMY_TARGET_SIZE_RED; // por defecto rojo
             if (isBlue) {
                 targetSize = ENEMY_TARGET_SIZE_BLUE;
             }
 
-            // Escala para que "mayor" pase a ser targetSize
             float scale = targetSize / mayor;
 
             float w = texW * scale;
@@ -747,7 +769,6 @@ static void render_game(Texture2D stageTex) {
 
             DrawTexturePro(tex, src, dst, origin, 0.0f, WHITE);
         } else {
-            // Fallback si no hay textura
             DrawCircle((int)e->x, (int)e->y, 10, RED);
         }
     }
@@ -758,7 +779,7 @@ static void render_game(Texture2D stageTex) {
 
         if (f->recolectada) continue;
 
-        Texture2D tex = {0};
+        Texture2D tex = (Texture2D){0};
 
         if (strcmp(f->tipo, "MANGO") == 0 && g_texMango.id) {
             tex = g_texMango;
@@ -779,7 +800,6 @@ static void render_game(Texture2D stageTex) {
 
             DrawTexturePro(tex, src, dst, origin, 0.0f, WHITE);
         } else {
-            // Fallback si algo falla
             DrawCircle((int)f->x, (int)f->y, 8, YELLOW);
         }
     }
@@ -793,7 +813,6 @@ static void render_game(Texture2D stageTex) {
             DrawLine((int)p->xLeft, (int)p->y, (int)p->xRight, (int)p->y,
                      Fade(RED, 0.7f));
 
-            // Etiqueta en el centro
             float midX = (p->xLeft + p->xRight) * 0.5f;
             DrawText(TextFormat("P%d", i), (int)midX - 10, (int)p->y - 15, 14, RED);
         }
@@ -805,30 +824,17 @@ static void render_game(Texture2D stageTex) {
             DrawLine((int)l->x, (int)l->yTop, (int)l->x, (int)l->yBottom,
                      Fade(BLUE, 0.7f));
 
-            // Etiqueta en la parte de arriba
             DrawText(TextFormat("L%d", j), (int)l->x - 10, (int)l->yTop - 20, 14, BLUE);
-        }
-    }
-
-    // Obtener vidas y puntos de mi jugador
-    int vidaLocal = -1;
-    int puntosLocal = 0;
-
-    for (int i = 0; i < g_state.totalJugadores; i++) {
-        Player *p = &g_state.jugadores[i];
-        if (strcmp(p->playerName, g_playerName) == 0) {
-            vidaLocal = p->vida;
-            puntosLocal = p->puntos;
-            break;
         }
     }
     
     pthread_mutex_unlock(&g_state.mutex);
     
-    // UI
+    // ===== HUD / UI =====
     DrawText(TextFormat("Evento: %s", g_eventoAsignado), 10, 10, 20, DARKGREEN);
     DrawText(TextFormat("Jugadores: %d", g_state.totalJugadores), 10, 35, 20, DARKGREEN);
     DrawText("Flechas: Mover | E: Enemigo | F: Fruta", 10, SCREEN_HEIGHT - 25, 15, DARKGRAY);
+
     DrawText(TextFormat("Vidas: %d", (vidaLocal >= 0 ? vidaLocal : 0)),
              10, 60, 20, RED);
     DrawText(TextFormat("Puntos: %d", puntosLocal),
@@ -842,6 +848,7 @@ static void render_game(Texture2D stageTex) {
     
     EndDrawing();
 }
+
 
 
 // -------------------------

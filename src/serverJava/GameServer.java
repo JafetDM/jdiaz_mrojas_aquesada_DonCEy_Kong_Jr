@@ -259,10 +259,13 @@ public class GameServer {
                 continue;
             }
 
-            // Actualizar enemigos y frutas dentro del GameState
+            // 1) Actualizar enemigos y frutas dentro del GameState
             gameState.actualizarEnemigosYFrutas(elementos);
 
-            // Enviar ESTADO_JUEGO a los suscriptores de este evento
+            // 2) Aplicar lógica de colisiones + respawn + vidas/puntos
+            gameState.procesarColisionesYRespawns(gestorEvento);
+
+            // 3) Enviar ESTADO_JUEGO a los suscriptores de este evento
             publisher.broadcastGameState();
         }
     }
