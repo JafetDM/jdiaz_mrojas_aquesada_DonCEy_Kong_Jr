@@ -308,11 +308,45 @@ public class GameServer {
             return;
         }
 
+        // Switch cases
+
         // Procesar según el tipo de paquete
         switch (paquete.tipo) {
+            case "TREPAR":
+                // El cliente indica que quiere trepar
+                gameState.actualizarEstadoTrepar(paquete.playerName, true);
+                publisher.notifySubscribers(paquete);
+                break;
+
+            case "SOLTAR_LIANA":
+                // El cliente suelta la liana
+                gameState.actualizarEstadoTrepar(paquete.playerName, false);
+                publisher.notifySubscribers(paquete);
+                break;
+
+            case "MOVER_EN_LIANA":
+                // Movimiento vertical mientras trepa
+                // El cliente envía deltaY en paquete.y
+                gameState.moverEnLiana(paquete.playerName, paquete.y);
+                publisher.notifySubscribers(paquete);
+                break;
+
             case "MOVIMIENTO":
+
                 // 1) Actualizar posición del jugador en el GameState
-                gameState.actualizarJugador(paquete.playerName, paquete.x, paquete.y);
+
+                // Modificar el caso existente para considerar si está trepando
+                GameState.PlayerState jugador = gameState.obtenerJugador(paquete.playerName);
+                    
+                if (jugador != null && jugador.trepando) {
+                    // Si está trepando, solo permitir movimiento vertical
+                    gameState.moverEnLiana(paquete.playerName, paquete.y - jugador.y);
+                } else {
+                    // Movimiento normal
+                    gameState.actualizarJugador(paquete.playerName, paquete.x, paquete.y);
+                        
+                    // Verificar colisiones...
+                }
 
                 // 2) Revisar colisión jugador-fruta en el GestorJuego de ESTE evento
                 {

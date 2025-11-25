@@ -116,6 +116,15 @@ public class GameState {
         public float y;
         public int vida;
         public int puntos;
+        public boolean trepando;      // está trepando?
+        public int lianaActual;       // índice de liana (-1 si no está en ninguna)
+        public String estadoMovimiento; // "CAMINANDO", "TREPANDO", "CAYENDO", "SALTANDO"
+        
+        public PlayerState() {
+            this.trepando = false;
+            this.lianaActual = -1;
+            this.estadoMovimiento = "CAMINANDO";
+        }
     }
 
     // Clases internas para enemigos y frutas
@@ -281,6 +290,85 @@ public class GameState {
      */
     public static GameState fromJson(String json) {
         return JsonUtils.fromJson(json, GameState.class);
+    }
+
+    // =============== LIANAS ==========================
+
+    /**
+     * Detecta si el jugador está cerca de una liana y puede trepar
+     */
+    private int detectarLianaCercana(float x, float y) {
+        final float TOLERANCIA_X = 15.0f; // píxeles de tolerancia horizontal
+        
+        for (int i = 0; i < LayoutDKJr.getCantidadLianas(); i++) {
+            LayoutDKJr.LianaDef liana = LayoutDKJr.getLiana(i);
+            
+            // Verificar si está cerca horizontalmente
+            float dx = Math.abs(liana.x - x);
+            if (dx <= TOLERANCIA_X) {
+                // Verificar si está dentro del rango vertical de la liana
+                if (y >= liana.yTop - 20.0f && y <= liana.yBottom + 20.0f) {
+                    return i;
+                }
+            }
+        }
+        return -1; // No está cerca de ninguna liana
+    }
+
+    /**
+     * Actualiza el estado de trepar del jugador
+     */
+    public void actualizarEstadoTrepar(String playerName, boolean intentaTrepar) {
+        PlayerState p = jugadores.get(playerName);
+        if (p == null) return;
+        
+        if (intentaTrepar) {
+            // Detectar si está cerca de una liana
+            int lianaIndex = detectarLianaCercana(p.x, p.y);
+            
+            if (lianaIndex >= 0) {
+                p.trepando = true;
+                p.lianaActual = lianaIndex;
+                p.estadoMovimiento = "TREPANDO";
+                
+                // Ajustar X para centrar en la liana
+                LayoutDKJr.LianaDef liana = LayoutDKJr.getLiana(lianaIndex);
+                p.x = liana.x;
+            }
+        } else {
+            // Soltar la liana
+            p.trepando = false;
+            p.lianaActual = -1;
+            p.estadoMovimiento = "CAMINANDO";
+        }
+        
+        this.timestamp = System.currentTimeMillis();
+    }
+
+    /**
+     * Procesa movimiento vertical cuando está trepando
+     */
+    public void moverEnLiana(String playerName, float deltaY) {
+        PlayerState p = jugadores.get(playerName);
+        if (p == null || !p.trepando || p.lianaActual < 0) return;
+        
+        LayoutDKJr.LianaDef liana = LayoutDKJr.getLiana(p.lianaActual);
+        
+        // Mover en Y
+        p.y += deltaY;
+        
+        // Limitar movimiento dentro de la liana
+        if (p.y < liana.yTop) {
+            p.y = liana.yTop;
+        }
+        if (p.y > liana.yBottom) {
+            p.y = liana.yBottom;
+            // Opcional: soltar al llegar al fondo
+            // p.trepando = false;
+            // p.lianaActual = -1;
+        }
+        
+        this.timestamp = System.currentTimeMillis();
     }
     
     // =============== GETTERS Y SETTERS ===============

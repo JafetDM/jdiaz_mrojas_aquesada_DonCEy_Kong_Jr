@@ -6,6 +6,9 @@
 #define ENEMY_TARGET_SIZE_RED   40.0f
 #define ENEMY_TARGET_SIZE_BLUE  42.0f 
 
+// Radio de colisión del jugador contra enemigos (px)
+#define PLAYER_HIT_RADIUS 24.0f
+
 // Física del juego
 #define GRAVITY    900.0f   // píxeles / s^2
 #define MOVE_SPEED 220.0f   // píxeles / s
@@ -32,11 +35,22 @@
 // Estructuras de estado
 // ========================
 
+// Estados del jugador
+typedef enum {
+    ESTADO_CAMINANDO,
+    ESTADO_TREPANDO,
+    ESTADO_CAYENDO,
+    ESTADO_SALTANDO
+} EstadoJugador;
+
 typedef struct {
     char playerName[64];
     float x, y;
     int vida;
     int puntos;
+    bool trepando;           // NUEVO: está trepando?
+    int lianaActual;         // NUEVO: índice de liana (-1 si no está)
+    char estadoMovimiento[32]; // NUEVO: "CAMINANDO", "TREPANDO", etc.
 } Player;
 
 typedef struct {
@@ -81,6 +95,27 @@ typedef struct {
 static void parse_game_state_json(const char *jsonText);
 static void parse_paquete_json(const char *jsonText);
 
+// Funciones de física y movimiento
+static float get_player_half_height(void);
+static void init_player_start_position(void);
+static void resolver_colision_plataformas(void);
+static void send_input_from_keys(void);
+static void respawn_player(void);
+
+// Funciones de red
+static int send_paquete(const char *tipo, const char *movimiento, float x, float y);
+static void *network_thread(void *arg);
+
+// Funciones de trepar
+static int detectar_liana_cercana(float x, float y);
+static int buscar_liana_cercana_horizontal(int lianaActual, int direccion);
+static void iniciar_trepar(void);
+static void soltar_liana(void);
+static void procesar_movimiento_trepar(float dt);
+
+// Renderizado
+static void render_game(Texture2D stageTex);
+
 static bool g_showLayoutDebug = true;
 
 static GameState g_state;
@@ -94,12 +129,75 @@ static char g_eventoAsignado[32] = "";
 static float g_playerX = 0.0f;
 static float g_playerY = 0.0f;
 static float g_playerVy = 0.0f;     // velocidad vertical
+static float g_playerPrevY = 0.0f;  // posición Y del frame anterior (para colisiones continuas)
 static bool  g_playerGrounded = false;
 static bool  g_playerInitialized = false;
+// Vida local y control de golpes
+static int g_playerVidaLocal = 3;
+static double g_lastHitTime = 0.0; // tiempo en segundos del último golpe recibido
+static const double HIT_COOLDOWN = 1.0; // segundos entre daños
+
+// Variables globales adicionales para trepar (declaradas temprano para uso en funciones)
+static EstadoJugador g_playerEstado = ESTADO_CAMINANDO;
+static int g_lianaActual = -1;  // -1 = no está en ninguna liana
+static float g_velocidadTrepar = 150.0f;  // píxeles por segundo
+
+// Comprueba colisiones con enemigos y aplica daño si corresponde.
+static void check_enemy_collisions(void) {
+    double now = GetTime();
+
+    pthread_mutex_lock(&g_state.mutex);
+    for (int i = 0; i < g_state.totalEnemigos; i++) {
+        Enemy *e = &g_state.enemigos[i];
+
+        // Distancia simple (círculos) entre jugador y enemigo
+        float dx = e->x - g_playerX;
+        float dy = e->y - g_playerY;
+        float dist2 = dx*dx + dy*dy;
+
+        float hitRadius = (float)PLAYER_HIT_RADIUS; // px
+        // Aumentar tolerancia cuando el jugador está trepando
+        if (g_playerEstado == ESTADO_TREPANDO) {
+            hitRadius *= 1.6f; // hacer golpeo más permisivo en liana
+        }
+        float nearRadius = hitRadius + 40.0f; // rango para "near" debug
+
+        if (dist2 <= hitRadius * hitRadius) {
+            if (now - g_lastHitTime >= HIT_COOLDOWN) {
+                g_lastHitTime = now;
+                g_playerVidaLocal -= 1;
+                printf("[HIT] Golpeado por enemigo %s. Vidas restantes: %d\n", e->id, g_playerVidaLocal);
+
+                // Notificar al servidor
+                send_paquete("HIT", "HIT", g_playerX, g_playerY);
+
+                // Si se acabaron las vidas, respawnear y resetear vidas
+                if (g_playerVidaLocal <= 0) {
+                    printf("[HIT] Vidas agotadas -> respawn y reset vidas\n");
+                    respawn_player();
+                    g_playerVidaLocal = 3;
+                } else {
+                    // Respawn parcial al ser golpeado
+                    respawn_player();
+                }
+            }
+        } else if (dist2 <= nearRadius * nearRadius) {
+            static double lastNearLog = 0.0;
+            double now2 = GetTime();
+            if (now2 - lastNearLog > 0.5) {
+                lastNearLog = now2;
+                printf("[NEAR] Enemigo %s a distancia %.1f px (estado=%s)\n",
+                       e->id, sqrtf(dist2), (g_playerEstado==ESTADO_TREPANDO?"TREPANDO":"NORMAL"));
+            }
+        }
+    }
+    pthread_mutex_unlock(&g_state.mutex);
+}
 
 // Texturas globales
 static Texture2D g_playerTex = {0};
 static Texture2D g_stageTex  = {0};
+
 
 // Frutas
 static Texture2D g_texMango   = {0};
@@ -117,6 +215,7 @@ static Texture2D g_texCrocBlueUp    = {0};
 static Texture2D g_texCrocBlueDown  = {0};
 static Texture2D g_texCrocBlueLeft  = {0};
 static Texture2D g_texCrocBlueRight = {0};
+
 
 // ===========================
 // Funciones auxiliares para arrays dinámicos
@@ -303,6 +402,9 @@ static void parse_game_state_json(const char *jsonText) {
             cJSON *y = cJSON_GetObjectItem(jugador, "y");
             cJSON *vida   = cJSON_GetObjectItem(jugador, "vida");
             cJSON *puntos = cJSON_GetObjectItem(jugador, "puntos");
+            cJSON *trepando = cJSON_GetObjectItem(jugador, "trepando");
+            cJSON *lianaActual = cJSON_GetObjectItem(jugador, "lianaActual");
+            cJSON *estadoMov = cJSON_GetObjectItem(jugador, "estadoMovimiento");
             
             if (x && y) {
                 Player *p = &g_state.jugadores[g_state.totalJugadores++];
@@ -314,6 +416,16 @@ static void parse_game_state_json(const char *jsonText) {
                 
                 p->vida   = (vida   && cJSON_IsNumber(vida))   ? vida->valueint   : 3;
                 p->puntos = (puntos && cJSON_IsNumber(puntos)) ? puntos->valueint : 0;
+
+                // parsear estado de trepar
+                p->trepando = (trepando && cJSON_IsBool(trepando)) ? cJSON_IsTrue(trepando) : false;
+                p->lianaActual = (lianaActual && cJSON_IsNumber(lianaActual)) ? lianaActual->valueint : -1;
+                
+                if (estadoMov && cJSON_IsString(estadoMov)) {
+                    strncpy(p->estadoMovimiento, estadoMov->valuestring, sizeof(p->estadoMovimiento) - 1);
+                } else {
+                    strcpy(p->estadoMovimiento, "CAMINANDO");
+                }
             }
         }
         
@@ -417,6 +529,186 @@ static void parse_game_state_json(const char *jsonText) {
     
     pthread_mutex_unlock(&g_state.mutex);
     cJSON_Delete(root);
+}
+
+// -------------------------
+// LIANAS
+// -------------------------
+
+// ========================
+// FUNCIONES AUXILIARES PARA TREPAR
+// ========================
+
+// Detecta si el jugador está cerca de alguna liana
+static int detectar_liana_cercana(float x, float y) {
+    // Usar tolerancias un poco más generosas y considerar pies/cabeza del jugador
+    const float TOLERANCIA_X = 32.0f;  // píxeles de tolerancia horizontal
+    const float TOLERANCIA_Y_EXTRA = 32.0f; // margen vertical extra
+
+    // Calcular pies y cabeza del jugador a partir de su centro 'y'
+    float halfH = get_player_half_height();
+    float feetY = y + halfH;
+    float headY  = y - halfH;
+
+    for (int i = 0; i < NUM_LIANAS; i++) {
+        const LianaDef *liana = &LIANAS[i];
+
+        // Verificar si está cerca horizontalmente (permitir algo de margen)
+        float dx = fabsf(liana->x - x);
+        if (dx > TOLERANCIA_X) continue;
+
+        // Verificar si cualquier parte del jugador (pies o cabeza) entra
+        // dentro del rango de la liana (con margen)
+        float topCheck = liana->yTop - TOLERANCIA_Y_EXTRA;
+        float bottomCheck = liana->yBottom + TOLERANCIA_Y_EXTRA;
+
+        if ((feetY >= topCheck && feetY <= bottomCheck) ||
+            (headY  >= topCheck && headY  <= bottomCheck) ||
+            (headY <= topCheck && feetY >= bottomCheck)) {
+            return i;
+        }
+    }
+
+    return -1; // No está cerca de ninguna liana
+}
+
+// Inicia el modo trepar
+static void iniciar_trepar(void) {
+    int lianaIndex = detectar_liana_cercana(g_playerX, g_playerY);
+    
+    if (lianaIndex >= 0) {
+        g_playerEstado = ESTADO_TREPANDO;
+        g_lianaActual = lianaIndex;
+        
+        // Centrar al jugador en la liana
+        g_playerX = LIANAS[lianaIndex].x;
+        // Asegurar que la Y quede dentro del rango de la liana
+        if (g_playerY < LIANAS[lianaIndex].yTop) g_playerY = LIANAS[lianaIndex].yTop;
+        if (g_playerY > LIANAS[lianaIndex].yBottom) g_playerY = LIANAS[lianaIndex].yBottom;
+
+        g_playerVy = 0.0f;
+        g_playerGrounded = false;
+        
+        printf("[TREPAR] Iniciado en liana %d\n", lianaIndex);
+        
+        // Notificar al servidor
+        send_paquete("TREPAR", "TREPAR", g_playerX, g_playerY);
+    }
+}
+
+// Detiene el modo trepar
+static void soltar_liana(void) {
+    if (g_playerEstado == ESTADO_TREPANDO) {
+        printf("[TREPAR] Soltando liana %d\n", g_lianaActual);
+        
+        g_playerEstado = ESTADO_CAYENDO;
+        g_lianaActual = -1;
+        
+        // Notificar al servidor
+        send_paquete("SOLTAR_LIANA", "QUIETO", g_playerX, g_playerY);
+    }
+}
+
+// Procesa movimiento mientras trepa
+static void procesar_movimiento_trepar(float dt) {
+    if (g_playerEstado != ESTADO_TREPANDO || g_lianaActual < 0) {
+        return;
+    }
+    
+    const LianaDef *liana = &LIANAS[g_lianaActual];
+    bool movio = false;
+    
+    // Movimiento vertical
+    if (IsKeyDown(KEY_UP) || IsKeyDown(KEY_W)) {
+        g_playerY -= g_velocidadTrepar * dt;
+        movio = true;
+        
+        // Limitar al tope de la liana
+        if (g_playerY < liana->yTop) {
+            g_playerY = liana->yTop;
+        }
+    }
+    
+    if (IsKeyDown(KEY_DOWN) || IsKeyDown(KEY_S)) {
+        g_playerY += g_velocidadTrepar * dt;
+        movio = true;
+        
+        // Limitar al fondo de la liana
+        if (g_playerY > liana->yBottom) {
+            g_playerY = liana->yBottom;
+            // Opcional: soltar automáticamente al llegar al fondo
+            // soltar_liana();
+        }
+    }
+    
+    // Saltar entre lianas (izquierda/derecha)
+    if (IsKeyPressed(KEY_LEFT) || IsKeyPressed(KEY_A)) {
+        int lianaIzq = buscar_liana_cercana_horizontal(g_lianaActual, -1);
+        if (lianaIzq >= 0) {
+            g_lianaActual = lianaIzq;
+            g_playerX = LIANAS[lianaIzq].x;
+            printf("[TREPAR] Saltó a liana %d (izquierda)\n", lianaIzq);
+            movio = true;
+        }
+    }
+    
+    if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D)) {
+        int lianaDer = buscar_liana_cercana_horizontal(g_lianaActual, 1);
+        if (lianaDer >= 0) {
+            g_lianaActual = lianaDer;
+            g_playerX = LIANAS[lianaDer].x;
+            printf("[TREPAR] Saltó a liana %d (derecha)\n", lianaDer);
+            movio = true;
+        }
+    }
+    
+    // Soltar con SPACE
+    if (IsKeyPressed(KEY_SPACE)) {
+        soltar_liana();
+        return;
+    }
+    
+    // Enviar actualización si se movió
+    if (movio) {
+        send_paquete("MOVER_EN_LIANA", "TREPAR", g_playerX, g_playerY);
+    }
+}
+
+// Busca liana cercana en dirección horizontal
+static int buscar_liana_cercana_horizontal(int lianaActual, int direccion) {
+    const float MAX_DISTANCIA = 100.0f;  // píxeles máximos para saltar
+    const float TOLERANCIA_Y = 80.0f;     // tolerancia vertical
+    
+    const LianaDef *origen = &LIANAS[lianaActual];
+    float mejorDistancia = MAX_DISTANCIA + 1.0f;
+    int mejorLiana = -1;
+    
+    for (int i = 0; i < NUM_LIANAS; i++) {
+        if (i == lianaActual) continue;
+        
+        const LianaDef *candidata = &LIANAS[i];
+        
+        // Verificar dirección
+        float dx = candidata->x - origen->x;
+        if ((direccion < 0 && dx >= 0) || (direccion > 0 && dx <= 0)) {
+            continue; // No está en la dirección correcta
+        }
+        
+        // Verificar altura compatible
+        if (g_playerY < candidata->yTop - TOLERANCIA_Y || 
+            g_playerY > candidata->yBottom + TOLERANCIA_Y) {
+            continue; // No está a una altura alcanzable
+        }
+        
+        // Calcular distancia
+        float distancia = fabsf(dx);
+        if (distancia < mejorDistancia) {
+            mejorDistancia = distancia;
+            mejorLiana = i;
+        }
+    }
+    
+    return mejorLiana;
 }
 
 // -------------------------
@@ -557,12 +849,32 @@ static void init_player_start_position(void) {
     send_paquete("MOVIMIENTO", "QUIETO", g_playerX, g_playerY);
 }
 
+// Fuerza respawn del jugador en la plataforma 0 (útil cuando cae al vacío)
+static void respawn_player(void) {
+    const PlataformaDef *floor = &PLATAFORMAS[0];
+    float halfH = get_player_half_height();
+
+    g_playerX = (floor->xLeft + floor->xRight) * 0.5f;
+    g_playerY = floor->y - halfH;
+    g_playerVy = 0.0f;
+    g_playerGrounded = true;
+    g_playerEstado = ESTADO_CAMINANDO;
+    g_lianaActual = -1;
+
+    // Asegurar que el cliente know it's initialized
+    g_playerInitialized = true;
+
+    printf("[RESPAWN] Jugador reubicado a (%.1f, %.1f)\n", g_playerX, g_playerY);
+    send_paquete("RESPAWN", "QUIETO", g_playerX, g_playerY);
+}
+
 // Resolver colisión con todas las plataformas
 static void resolver_colision_plataformas(void) {
     if (!g_playerInitialized) return;
 
     float halfH = get_player_half_height();
     float feetY = g_playerY + halfH;
+    float prevFeetY = g_playerPrevY + halfH;
 
     g_playerGrounded = false;
     const float tolerancia = 6.0f;  // rango para "aterrizar" en la plataforma
@@ -577,11 +889,16 @@ static void resolver_colision_plataformas(void) {
 
         float platY = p->y;
 
-        // Solo colisionamos si venimos cayendo (vy >= 0)
-        if (g_playerVy >= 0.0f &&
-            feetY >= platY - tolerancia &&
-            feetY <= platY + tolerancia) {
+        // Detección robusta: si en el frame anterior estábamos por encima
+        // de la plataforma y ahora hemos cruzado su Y (posible 'tunneling'),
+        // o si estamos dentro de la tolerancia actualmente.
+        bool crossed = (prevFeetY <= platY) && (feetY >= platY - tolerancia);
+        bool inside  = (feetY >= platY - tolerancia) && (feetY <= platY + tolerancia);
 
+        // Solo aplicar corrección cuando estamos cayendo (vy >= 0).
+        // Evita que al iniciar un salto (vy < 0) el jugador sea "snappeado"
+        // a la plataforma por la comprobación 'inside'.
+        if ((g_playerVy >= 0.0f) && (crossed || inside)) {
             // Ajustar al jugador para que quede "parado" justo sobre la plataforma
             g_playerY = platY - halfH;
             g_playerVy = 0.0f;
@@ -595,30 +912,86 @@ static void resolver_colision_plataformas(void) {
 // Enviar input del teclado + física del jugador
 // -------------------------
 static void send_input_from_keys(void) {
-    // Asegurar que el jugador tenga posición inicial sobre la plataforma 0
+    // Asegurar posición inicial
     init_player_start_position();
+
+    // Guardar Y anterior para detección continua de colisiones
+    g_playerPrevY = g_playerY;
 
     float dt = GetFrameTime();
     if (dt <= 0.0f) dt = 1.0f / 60.0f;
+
+    // ===== MODO TREPAR =====
+    if (g_playerEstado == ESTADO_TREPANDO) {
+        procesar_movimiento_trepar(dt);
+        // Comprobar colisiones también mientras trepamos
+        check_enemy_collisions();
+        return; // No procesar física normal
+    }
+
+    // --- Atajos / debug: teclas P y T ---
+    if (IsKeyPressed(KEY_P)) {
+        // Teleport de prueba a la liana 0
+        if (NUM_LIANAS > 0) {
+            g_playerX = LIANAS[0].x;
+            g_playerY = LIANAS[0].yBottom;
+            g_playerVy = 0.0f;
+            g_playerGrounded = false;
+            printf("[DEBUG] Teleport a L0 -> (%.1f, %.1f)\n", g_playerX, g_playerY);
+        }
+    }
+
+    if (IsKeyPressed(KEY_T)) {
+        g_showLayoutDebug = !g_showLayoutDebug;
+        printf("[DEBUG] g_showLayoutDebug = %d\n", g_showLayoutDebug);
+    }
+
+    // Log básico de detección de teclas (solo cuando se presionan)
+    if (IsKeyPressed(KEY_UP) || IsKeyPressed(KEY_W)) {
+        printf("[INPUT] Tecla ARRIBA detectada\n");
+    }
+    if (IsKeyPressed(KEY_SPACE)) {
+        printf("[INPUT] Tecla ESPACIO detectada\n");
+    }
+
+    // ===== MODO NORMAL (CAMINANDO/CAYENDO) =====
+    
+    // Intentar trepar con tecla arriba (permitir mantener la tecla presionada)
+    if (IsKeyDown(KEY_UP) || IsKeyDown(KEY_W)) {
+        int lianaCercana = detectar_liana_cercana(g_playerX, g_playerY);
+        if (lianaCercana >= 0) {
+            iniciar_trepar();
+            return; // Cambió a modo trepar
+        }
+    }
 
     float dx = 0.0f;
     const char *movimiento = "QUIETO";
 
     // Movimiento lateral
-    if (IsKeyDown(KEY_RIGHT)) {
+    if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D)) {
         dx += MOVE_SPEED * dt;
         movimiento = "DERECHA";
     }
-    if (IsKeyDown(KEY_LEFT)) {
+    if (IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A)) {
         dx -= MOVE_SPEED * dt;
         movimiento = "IZQUIERDA";
     }
 
-    // Salto (espacio) solo si está en el suelo
-    if (IsKeyPressed(KEY_SPACE) && g_playerGrounded) {
-        g_playerVy = JUMP_SPEED;
-        g_playerGrounded = false;
-        movimiento = "ARRIBA";
+    // Salto (ESPACIO o W/ARRIBA) solo si está en el suelo
+    if ((IsKeyPressed(KEY_SPACE) || IsKeyPressed(KEY_W) || IsKeyPressed(KEY_UP))) {
+        // Log de depuración: estado del suelo
+        printf("[INPUT] SALTO detectado - grounded=%d, vy=%.2f\n", (int)g_playerGrounded, g_playerVy);
+        if (g_playerGrounded) {
+            g_playerVy = JUMP_SPEED;
+            g_playerGrounded = false;
+            g_playerEstado = ESTADO_SALTANDO;
+            movimiento = "ARRIBA";
+            printf("[ACTION] Saltando -> vy=%.2f\n", g_playerVy);
+        } else {
+            // Si no está grounded, ignorar salto pero lo informamos
+            printf("[ACTION] Intento de salto ignorado (no grounded)\n");
+        }
     }
 
     // Física vertical: gravedad
@@ -634,8 +1007,24 @@ static void send_input_from_keys(void) {
 
     // Colisión con plataformas
     resolver_colision_plataformas();
+    
+    // Actualizar estado
+    if (g_playerGrounded) {
+        g_playerEstado = ESTADO_CAMINANDO;
+    } else if (g_playerVy > 0) {
+        g_playerEstado = ESTADO_CAYENDO;
+    }
 
-    // Enviar al servidor solo si la posición cambió
+    // Respawn si cae fuera de límites (p. ej. cae al vacío)
+    // Si la Y del centro del jugador supera la pantalla por bastante, respawnear
+    if (g_playerY > (float)SCREEN_HEIGHT + 200.0f) {
+        respawn_player();
+    }
+
+    // Comprobar colisiones con enemigos (modo normal)
+    check_enemy_collisions();
+
+    // Enviar al servidor solo si cambió
     static float lastX = 0.0f;
     static float lastY = 0.0f;
     static bool firstSend = true;
@@ -669,6 +1058,43 @@ static void render_game(Texture2D stageTex) {
     // Variables de HUD (vidas/puntos del jugador local)
     int vidaLocal = -1;
     int puntosLocal = 0;
+
+    // Indicador visual cuando está trepando
+    if (g_playerEstado == ESTADO_TREPANDO && g_lianaActual >= 0) {
+        const LianaDef *liana = &LIANAS[g_lianaActual];
+        
+        // Resaltar la liana actual
+        DrawLine((int)liana->x, (int)liana->yTop, 
+                (int)liana->x, (int)liana->yBottom,
+                Fade(YELLOW, 0.8f));
+        
+        // Mostrar indicador
+        DrawText("TREPANDO", 10, 110, 20, YELLOW);
+        DrawText(TextFormat("Liana: %d", g_lianaActual), 10, 135, 18, YELLOW);
+    }
+
+    // Mostrar estado actual
+    const char *estadoTexto = "";
+    Color estadoColor = WHITE;
+    switch (g_playerEstado) {
+        case ESTADO_CAMINANDO:
+            estadoTexto = "CAMINANDO";
+            estadoColor = GREEN;
+            break;
+        case ESTADO_TREPANDO:
+            estadoTexto = "TREPANDO";
+            estadoColor = YELLOW;
+            break;
+        case ESTADO_CAYENDO:
+            estadoTexto = "CAYENDO";
+            estadoColor = ORANGE;
+            break;
+        case ESTADO_SALTANDO:
+            estadoTexto = "SALTANDO";
+            estadoColor = SKYBLUE;
+            break;
+    }
+    DrawText(TextFormat("Estado: %s", estadoTexto), 10, 160, 18, estadoColor);
     
     pthread_mutex_lock(&g_state.mutex);
     
@@ -676,43 +1102,82 @@ static void render_game(Texture2D stageTex) {
     for (int i = 0; i < g_state.totalJugadores; i++) {
         Player *p = &g_state.jugadores[i];
         
-        if (strcmp(p->playerName, g_playerName) == 0 && g_playerTex.id != 0) {
-            // Soy yo -> sprite de DK Jr
+            if (strcmp(p->playerName, g_playerName) == 0 && g_playerTex.id != 0) {
+            // SOY YO -> dibujar usando la posición local (feedback inmediato)
+            // y mantener los datos del servidor en g_state para HUD
             Rectangle src = { 0, 0, (float)g_playerTex.width, (float)g_playerTex.height };
 
             float w = g_playerTex.width  * PLAYER_SCALE;
             float h = g_playerTex.height * PLAYER_SCALE;
 
-            Rectangle dst = { p->x, p->y, w, h };
-            Vector2 origin = { w / 2.0f, h / 2.0f };   // mitad del tamaño escalado
+            // Usar la posición local para renderizar (reduce sensación de lag al trepar)
+            float drawX = g_playerX;
+            float drawY = g_playerY;
+
+            Rectangle dst = { drawX, drawY, w, h };
+            Vector2 origin = { w / 2.0f, h / 2.0f };
 
             DrawTexturePro(g_playerTex, src, dst, origin, 0.0f, WHITE);
 
             // ======== HUD local ========
-            vidaLocal   = p->vida;
+            // Usar la vida local gestionada por el cliente para feedback inmediato
+            vidaLocal   = g_playerVidaLocal;
             puntosLocal = p->puntos;
 
-            // ======== SYNC SOLO EN RESPAWN REAL ========
-            float dx = fabsf(p->x - g_playerX);
-            float dy = fabsf(p->y - g_playerY);
+            // Mantener una copia local del estado del server para este jugador
+            // (no sobrescribimos g_state desde el servidor automáticamente,
+            //  pero actualizamos algunos campos visibles para consistencia)
+            p->x = g_playerX;
+            p->y = g_playerY;
+            p->trepando = (g_playerEstado == ESTADO_TREPANDO);
+            p->lianaActual = g_lianaActual;
 
-            // Solo consideramos “respawn” si la diferencia en Y es grande
+            // Si el servidor indica que estoy trepando cuando yo no lo estoy,
+            // sincronizo el estado local para evitar inconsistencias.
+            if (p->trepando && g_playerEstado != ESTADO_TREPANDO) {
+                printf("[SYNC] Servidor indica que estoy trepando\n");
+                g_playerEstado = ESTADO_TREPANDO;
+                g_lianaActual = p->lianaActual;
+                g_playerX = p->x;
+                g_playerY = p->y;
+            }
+
+            // Si el servidor reporta una gran diferencia en Y (respawn), aplicar
+            float dy = fabsf(p->y - g_playerY);
             if (dy > 40.0f) {
                 g_playerX = p->x;
                 g_playerY = p->y;
-
                 g_playerVy = 0.0f;
                 g_playerGrounded = true;
-
                 printf("[SYNC] Respawn detectado -> corrigiendo posición local\n");
             }
 
+            // Dibujar nombre usando la posición local
+            DrawText(p->playerName, (int)drawX - 20, (int)drawY - 30, 10, BLACK);
+
         } else {
-            // Otros jugadores como círculo por ahora
+            // OTROS JUGADORES
             Color color = GREEN;
+            
+            // Si está trepando, dibujar con indicador especial
+            if (p->trepando) {
+                // Dibujar línea vertical indicando que está en liana
+                if (p->lianaActual >= 0 && p->lianaActual < NUM_LIANAS) {
+                    const LianaDef *liana = &LIANAS[p->lianaActual];
+                    DrawLine((int)liana->x, (int)liana->yTop,
+                            (int)liana->x, (int)liana->yBottom,
+                            Fade(YELLOW, 0.3f));
+                }
+                color = YELLOW; // Color diferente cuando trepa
+                
+                // Indicador visual "T" sobre el jugador
+                DrawText("T", (int)p->x - 3, (int)p->y - 40, 16, YELLOW);
+            }
+            
             DrawCircle((int)p->x, (int)p->y, 15, color);
         }
 
+        // Nombre del jugador
         DrawText(p->playerName, (int)p->x - 20, (int)p->y - 30, 10, BLACK);
     }
     
@@ -834,6 +1299,14 @@ static void render_game(Texture2D stageTex) {
     DrawText(TextFormat("Evento: %s", g_eventoAsignado), 10, 10, 20, DARKGREEN);
     DrawText(TextFormat("Jugadores: %d", g_state.totalJugadores), 10, 35, 20, DARKGREEN);
     DrawText("Flechas: Mover | E: Enemigo | F: Fruta", 10, SCREEN_HEIGHT - 25, 15, DARKGRAY);
+
+    // Información adicional cuando está trepando
+    if (g_playerEstado == ESTADO_TREPANDO) {
+        DrawRectangle(5, SCREEN_HEIGHT - 80, 390, 50, Fade(BLACK, 0.7f));
+        DrawText("TREPANDO - Arriba/Abajo: Subir/Bajar", 10, SCREEN_HEIGHT - 75, 14, YELLOW);
+        DrawText("           Izq/Der: Cambiar liana | ESPACIO: Soltar", 
+                10, SCREEN_HEIGHT - 55, 14, YELLOW);
+    }
 
     DrawText(TextFormat("Vidas: %d", (vidaLocal >= 0 ? vidaLocal : 0)),
              10, 60, 20, RED);
