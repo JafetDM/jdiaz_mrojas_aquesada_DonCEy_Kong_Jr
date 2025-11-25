@@ -190,14 +190,15 @@ public class GameState {
 
         // Spawn en la plataforma 0
         float spawnX = LayoutDKJr.getXCentroPlataforma(0);
-        float spawnY = LayoutDKJr.getYForPlataforma(0) - 15.0f; // un poquito arriba
+        float spawnY = LayoutDKJr.getYForPlataforma(0) - 15.0f;
 
-        final float PLAYER_RADIUS = 14.0f;
+        // RADIOS AJUSTADOS SEGÚN ESTADO DEL JUGADOR
+        final float PLAYER_RADIUS_NORMAL = 14.0f;
+        final float PLAYER_RADIUS_TREPAR = 24.0f;  // MÁS GRANDE cuando trepa
         final float ENEMY_RADIUS  = 16.0f;
         final float FRUIT_RADIUS  = 18.0f;
 
-        // Límite de caída (debajo de la pantalla / piso)
-        // Si quieres lo puedes afinar, pero 600 va bien con tu layout
+        // Límite de caída
         float fallLimitY = 700.0f;
 
         long now = System.currentTimeMillis();
@@ -208,30 +209,43 @@ public class GameState {
             float px = p.x;
             float py = p.y;
 
+            // AJUSTAR RADIO DE COLISIÓN SEGÚN SI ESTÁ TREPANDO
+            float playerRadius = p.trepando ? PLAYER_RADIUS_TREPAR : PLAYER_RADIUS_NORMAL;
+
             // Cooldown de daño
             Long lastHit = ultimoDaño.get(p.playerName);
             long elapsed = (lastHit == null) ? Long.MAX_VALUE : (now - lastHit);
             boolean puedeRecibirDaño = elapsed > HIT_COOLDOWN_MS;
 
+            //  DETECTAR CAÍDA AL VACÍO
             boolean caida = (py > fallLimitY);
             boolean chocaEnemigo = false;
 
-            // Solo checamos enemigos si ya puede recibir daño
+            //  DETECTAR COLISIÓN CON ENEMIGOS
             if (puedeRecibirDaño && !caida) {
                 for (EnemyState e : enemigos) {
                     float dx = e.x - px;
                     float dy = e.y - py;
                     float dist2 = dx * dx + dy * dy;
 
-                    float minDist = ENEMY_RADIUS + PLAYER_RADIUS;
+                    // USAR RADIO AJUSTADO
+                    float minDist = ENEMY_RADIUS + playerRadius;
+                    
                     if (dist2 < minDist * minDist) {
                         chocaEnemigo = true;
+                        
+                        // LOG MEJORADO
+                        String estado = p.trepando ? "TREPANDO" : "NORMAL";
+                        System.out.println("[COLISION] " + p.playerName + 
+                                        " [" + estado + "] golpeado por " + e.tipo + 
+                                        " | dist=" + String.format("%.1f", Math.sqrt(dist2)) +
+                                        " | pos=(" + String.format("%.1f,%.1f", px, py) + ")");
                         break;
                     }
                 }
             }
 
-            // --- Colisión con frutas (no tienen cooldown, solo suman puntos) ---
+            // --- Colisión con frutas ---
             for (FruitState f : frutas) {
                 if (f.recolectada) continue;
 
@@ -243,37 +257,66 @@ public class GameState {
                     p.puntos += f.puntos;
                     f.recolectada = true;
                     frutasAEliminar.add(f);
+                    System.out.println("[FRUTA] " + p.playerName + 
+                                    " recolectó " + f.tipo + " (+" + f.puntos + " pts)");
                 }
             }
 
-            // --- Aplicar daño SOLO si puede recibir daño y hubo caída o enemigo ---
+            //  APLICAR DAÑO SI CORRESPONDE
             if (puedeRecibirDaño && (caida || chocaEnemigo)) {
 
-                // Bajar vida
+                // Log del evento
+                if (caida) {
+                    System.out.println("[CAÍDA] " + p.playerName + 
+                                    " cayó al vacío (y=" + String.format("%.1f", py) + ")");
+                }
+
+                // 1) Restar vida
+                int vidasAntes = p.vida;
                 if (p.vida > 0) {
                     p.vida--;
                 }
+                System.out.println("[VIDA] " + p.playerName + 
+                                " -> " + vidasAntes + " => " + p.vida + " vidas");
 
-                // Si llegó a 0 vidas: resetear a 3 y puntos a 0
+                // 2) Si llegó a 0 vidas: GAME OVER
                 if (p.vida <= 0) {
                     p.vida = 3;
                     p.puntos = 0;
+                    System.out.println("[GAME OVER] " + p.playerName + 
+                                    " -> vidas=3, puntos=0 (RESET COMPLETO)");
                 }
 
-                // Respawn en P0 SIEMPRE que muera
+                // 3)RESPAWN FORZOSO
+                float oldX = p.x;
+                float oldY = p.y;
+                
                 p.x = spawnX;
                 p.y = spawnY;
+                
+                // 4) Resetear estado de movimiento
+                p.trepando = false;
+                p.lianaActual = -1;
+                p.estadoMovimiento = "CAMINANDO";
 
-                // Actualizamos cooldown para que no reciba daño inmediato otra vez
+                System.out.println("[RESPAWN] " + p.playerName + 
+                                " | desde (" + String.format("%.1f,%.1f", oldX, oldY) + 
+                                ") => P0 (" + String.format("%.1f,%.1f", spawnX, spawnY) + ")");
+
+                // 5) Actualizar cooldown
                 ultimoDaño.put(p.playerName, now);
+                
+                // FORZAR TIMESTAMP PARA QUE EL CLIENTE RECIBA ACTUALIZACIÓN INMEDIATA
+                this.timestamp = now;
             }
         }
 
-        // Eliminar frutas del GestorJuego (mundo real del servidor)
+        // Eliminar frutas recolectadas
         for (FruitState f : frutasAEliminar) {
             gestor.eliminarFrutaPorPosicion(f.x, f.y, 5.0f);
         }
 
+        // ACTUALIZAR TIMESTAMP SIEMPRE
         this.timestamp = System.currentTimeMillis();
     }
 
