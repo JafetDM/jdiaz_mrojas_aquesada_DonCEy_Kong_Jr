@@ -30,6 +30,8 @@
 #include "librerias/cJSON.h"
 #include "config.h"
 #include "layout.h" 
+#include <sys/types.h>
+#include <sys/wait.h>
 
 // ========================
 // Estructuras de estado
@@ -124,6 +126,35 @@ static volatile bool g_running = true;
 static pthread_mutex_t g_send_mutex = PTHREAD_MUTEX_INITIALIZER;
 static char g_playerName[64] = "ClienteC";
 static char g_eventoAsignado[32] = "";
+// Flag para indicar si este cliente es espectador
+static bool g_isSpectator = false;
+// Si somos espectador, nombre del jugador objetivo (ej. "Jugador1")
+static char g_spectatorTarget[64] = "";
+// Si se lanzó el cliente en modo espejo: esta instancia es un espectador que
+// debe renderizar la vista exactamente centrada en un jugador objetivo.
+static bool g_spectatorMirrorMode = false;
+
+// Ruta/executable usada para lanzar instancias espejo (copiada de argv[0])
+static char g_execPath[512] = "./cliente";
+
+// Lanzar un nuevo proceso cliente en modo espejo para este jugador
+static void launch_spectator_instance(const char *playerName) {
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("fork");
+        return;
+    }
+    if (pid == 0) {
+        // Child: ejecutar nueva instancia
+        execlp(g_execPath, g_execPath, "--mirror", playerName, (char*)NULL);
+        // Si execlp falla
+        perror("execlp");
+        _exit(1);
+    } else {
+        // Parent: opcionalmente no esperar; imprimimos PID
+        printf("[LAUNCH] Spectator instance launched (pid=%d) for %s\n", (int)pid, playerName);
+    }
+}
 
 // Física del jugador local (lado cliente)
 static float g_playerX = 0.0f;
@@ -249,6 +280,31 @@ static void parse_paquete_json(const char *jsonText) {
                 g_playerName[len] = '\0';
 
                 printf("[INFO] Nombre jugador asignado por server: %s\n", g_playerName);
+            }
+            // Si el servidor envía una confirmación de espectador, parsear objetivo
+            if (strstr(msg, "ESPECTADOR")) {
+                // Buscar "mirando a <name>"
+                const char *m = strstr(msg, "mirando a ");
+                if (m) {
+                    m += strlen("mirando a ");
+                    // leer hasta espacio o fin
+                    char tmp[64] = {0};
+                    int i = 0;
+                    while (*m && *m != ' ' && i < (int)sizeof(tmp)-1) {
+                        tmp[i++] = *m++;
+                    }
+                    tmp[i] = '\0';
+                    if (i > 0) {
+                        strncpy(g_spectatorTarget, tmp, sizeof(g_spectatorTarget)-1);
+                        g_spectatorTarget[sizeof(g_spectatorTarget)-1] = '\0';
+                        g_isSpectator = true;
+                        printf("[INFO] Espectador objetivo: %s\n", g_spectatorTarget);
+                    }
+                } else {
+                    // Sin objetivo aún
+                    g_spectatorTarget[0] = '\0';
+                    g_isSpectator = true;
+                }
             }
         }
     }
@@ -590,22 +646,29 @@ static void procesar_movimiento_trepar(float dt) {
     }
     
     // Saltar entre lianas (izquierda/derecha)
+    bool sentTreparPacket = false;
     if (IsKeyPressed(KEY_LEFT) || IsKeyPressed(KEY_A)) {
         int lianaIzq = buscar_liana_cercana_horizontal(g_lianaActual, -1);
         if (lianaIzq >= 0) {
             g_lianaActual = lianaIzq;
             g_playerX = LIANAS[lianaIzq].x;
             printf("[TREPAR] Saltó a liana %d (izquierda)\n", lianaIzq);
+            // Notificar al servidor que cambiamos de liana y sincronizar X/Y
+            send_paquete("TREPAR", "TREPAR", g_playerX, g_playerY);
+            sentTreparPacket = true;
             movio = true;
         }
     }
-    
+
     if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D)) {
         int lianaDer = buscar_liana_cercana_horizontal(g_lianaActual, 1);
         if (lianaDer >= 0) {
             g_lianaActual = lianaDer;
             g_playerX = LIANAS[lianaDer].x;
             printf("[TREPAR] Saltó a liana %d (derecha)\n", lianaDer);
+            // Notificar al servidor que cambiamos de liana y sincronizar X/Y
+            send_paquete("TREPAR", "TREPAR", g_playerX, g_playerY);
+            sentTreparPacket = true;
             movio = true;
         }
     }
@@ -795,8 +858,10 @@ static void init_player_start_position(void) {
     g_playerGrounded = true;
     g_playerInitialized = true;
 
-    // Mandar posición inicial al servidor
-    send_paquete("MOVIMIENTO", "QUIETO", g_playerX, g_playerY);
+    // Mandar posición inicial al servidor (solo si no somos espectador)
+    if (!g_isSpectator) {
+        send_paquete("MOVIMIENTO", "QUIETO", g_playerX, g_playerY);
+    }
 }
 
 // Fuerza respawn del jugador en la plataforma 0 (útil cuando cae al vacío)
@@ -815,7 +880,9 @@ static void respawn_player(void) {
     g_playerInitialized = true;
 
     printf("[RESPAWN] Jugador reubicado a (%.1f, %.1f)\n", g_playerX, g_playerY);
-    send_paquete("RESPAWN", "QUIETO", g_playerX, g_playerY);
+    if (!g_isSpectator) {
+        send_paquete("RESPAWN", "QUIETO", g_playerX, g_playerY);
+    }
 }
 
 // Resolver colisión con todas las plataformas
@@ -862,6 +929,15 @@ static void resolver_colision_plataformas(void) {
 // Enviar input del teclado + física del jugador
 // -------------------------
 static void send_input_from_keys(void) {
+    // Si somos espectador no enviamos inputs al servidor (solo visualizamos)
+    if (g_isSpectator) {
+        // Aún permitimos toggles locales de depuración
+        if (IsKeyPressed(KEY_T)) {
+            g_showLayoutDebug = !g_showLayoutDebug;
+            printf("[DEBUG] g_showLayoutDebug = %d\n", g_showLayoutDebug);
+        }
+        return;
+    }
     // Asegurar posición inicial
     init_player_start_position();
 
@@ -875,6 +951,16 @@ static void send_input_from_keys(void) {
     if (g_playerEstado == ESTADO_TREPANDO) {
         procesar_movimiento_trepar(dt);
         return; // No procesar física normal
+    }
+
+    // Atajo: F12 lanza una nueva instancia espectador que duplica nuestra vista
+    if (IsKeyPressed(KEY_F12) && !g_isSpectator) {
+        // Solo si tenemos un nombre de jugador válido (Jugador1/Jugador2)
+        if (strncmp(g_playerName, "Jugador", 7) == 0) {
+            launch_spectator_instance(g_playerName);
+        } else {
+            printf("[LAUNCH] Nombre de jugador no válido para espejo: %s\n", g_playerName);
+        }
     }
 
     // --- Atajos / debug: teclas P y T ---
@@ -994,11 +1080,63 @@ static void render_game(Texture2D stageTex) {
     BeginDrawing();
     ClearBackground(RAYWHITE);
     
-    // Fondo
-    if (stageTex.id != 0) {
-        Rectangle src = {0, 0, (float)stageTex.width, (float)stageTex.height};
-        Rectangle dst = {0, 0, (float)SCREEN_WIDTH, (float)SCREEN_HEIGHT};
-        DrawTexturePro(stageTex, src, dst, (Vector2){0,0}, 0.0f, WHITE);
+    // Render del stage: si estamos en modo espejo (espectador lanzado con
+    // --mirror), dibujamos la ventana centrada en el jugador objetivo;
+    // en caso contrario, dibujamos el stage completo escalado a la pantalla.
+    Rectangle srcStage = { 0, 0, 0, 0 };
+    if (g_spectatorMirrorMode && g_spectatorTarget[0] != '\0') {
+        float camCenterX = g_playerX;
+        float camCenterY = g_playerY;
+        // Buscar la posición del objetivo en el estado recibido
+        pthread_mutex_lock(&g_state.mutex);
+        for (int i = 0; i < g_state.totalJugadores; i++) {
+            Player *pt = &g_state.jugadores[i];
+            if (strcmp(pt->playerName, g_spectatorTarget) == 0) {
+                camCenterX = pt->x;
+                camCenterY = pt->y;
+                break;
+            }
+        }
+        pthread_mutex_unlock(&g_state.mutex);
+
+        if (stageTex.id != 0) {
+            float texW = (float)stageTex.width;
+            float texH = (float)stageTex.height;
+            float camX = camCenterX - ((float)SCREEN_WIDTH * 0.5f);
+            float camY = camCenterY - ((float)SCREEN_HEIGHT * 0.5f);
+
+            // Asegurarnos de no pedir una región fuera del tamaño de la textura.
+            float viewW = SCREEN_WIDTH;
+            float viewH = SCREEN_HEIGHT;
+            if (viewW > texW) viewW = texW;
+            if (viewH > texH) viewH = texH;
+
+            if (camX < 0) camX = 0;
+            if (camY < 0) camY = 0;
+            if (camX + viewW > texW) camX = texW - viewW;
+            if (camY + viewH > texH) camY = texH - viewH;
+            if (camX < 0) camX = 0;
+            if (camY < 0) camY = 0;
+
+            // Usar coordenadas enteras en el source rect para evitar artefactos
+            srcStage.x = (float)((int)camX);
+            srcStage.y = (float)((int)camY);
+            srcStage.width  = (float)((int)viewW);
+            srcStage.height = (float)((int)viewH);
+
+            Rectangle dst = {0, 0, (float)SCREEN_WIDTH, (float)SCREEN_HEIGHT};
+            DrawTexturePro(stageTex, srcStage, dst, (Vector2){0,0}, 0.0f, WHITE);
+        }
+    } else {
+        if (stageTex.id != 0) {
+            srcStage.x = 0;
+            srcStage.y = 0;
+            srcStage.width  = (float)stageTex.width;
+            srcStage.height = (float)stageTex.height;
+
+            Rectangle dst = {0, 0, (float)SCREEN_WIDTH, (float)SCREEN_HEIGHT};
+            DrawTexturePro(stageTex, srcStage, dst, (Vector2){0,0}, 0.0f, WHITE);
+        }
     }
 
     // Variables de HUD (vidas/puntos del jugador local)
@@ -1044,6 +1182,14 @@ static void render_game(Texture2D stageTex) {
     
     pthread_mutex_lock(&g_state.mutex);
     
+    // Offset de cámara (copiado de srcStage)
+    float camOffsetX = 0.0f;
+    float camOffsetY = 0.0f;
+    if (stageTex.id != 0) {
+        camOffsetX = srcStage.x;
+        camOffsetY = srcStage.y;
+    }
+
     // Dibujar todos los jugadores
     for (int i = 0; i < g_state.totalJugadores; i++) {
         Player *p = &g_state.jugadores[i];
@@ -1090,8 +1236,8 @@ static void render_game(Texture2D stageTex) {
             float w = g_playerTex.width  * PLAYER_SCALE;
             float h = g_playerTex.height * PLAYER_SCALE;
 
-            float drawX = g_playerX;
-            float drawY = g_playerY;
+            float drawX = g_playerX - camOffsetX;
+            float drawY = g_playerY - camOffsetY;
 
             Rectangle dst = (Rectangle){ drawX, drawY, w, h };
             Vector2 origin = (Vector2){ w / 2.0f, h / 2.0f };
@@ -1102,6 +1248,8 @@ static void render_game(Texture2D stageTex) {
             DrawText(p->playerName, (int)drawX - 20, (int)drawY - 30, 10, BLACK);
 
         } else {
+            float screenX = p->x - camOffsetX;
+            float screenY = p->y - camOffsetY;
             // ===== OTROS JUGADORES =====
             Color color = GREEN;
             
@@ -1109,18 +1257,18 @@ static void render_game(Texture2D stageTex) {
             if (p->trepando) {
                 if (p->lianaActual >= 0 && p->lianaActual < NUM_LIANAS) {
                     const LianaDef *liana = &LIANAS[p->lianaActual];
-                    DrawLine((int)liana->x, (int)liana->yTop,
-                            (int)liana->x, (int)liana->yBottom,
+                    DrawLine((int)(liana->x - camOffsetX), (int)(liana->yTop - camOffsetY),
+                            (int)(liana->x - camOffsetX), (int)(liana->yBottom - camOffsetY),
                             Fade(YELLOW, 0.3f));
                 }
                 color = YELLOW;
-                DrawText("T", (int)p->x - 3, (int)p->y - 40, 16, YELLOW);
+                DrawText("T", (int)screenX - 3, (int)screenY - 40, 16, YELLOW);
             }
             
-            DrawCircle((int)p->x, (int)p->y, 15, color);
+            DrawCircle((int)screenX, (int)screenY, 15, color);
 
             // Nombre de los otros jugadores
-            DrawText(p->playerName, (int)p->x - 20, (int)p->y - 30, 10, BLACK);
+            DrawText(p->playerName, (int)screenX - 20, (int)screenY - 30, 10, BLACK);
         }
     }
 
@@ -1173,12 +1321,12 @@ static void render_game(Texture2D stageTex) {
             float w = texW * scale;
             float h = texH * scale;
 
-            Rectangle dst = (Rectangle){ e->x, e->y, w, h };
+            Rectangle dst = (Rectangle){ e->x - camOffsetX, e->y - camOffsetY, w, h };
             Vector2 origin = (Vector2){ w / 2.0f, h / 2.0f };
 
             DrawTexturePro(tex, src, dst, origin, 0.0f, WHITE);
         } else {
-            DrawCircle((int)e->x, (int)e->y, 10, RED);
+            DrawCircle((int)(e->x - camOffsetX), (int)(e->y - camOffsetY), 10, RED);
         }
     }
     
@@ -1204,12 +1352,12 @@ static void render_game(Texture2D stageTex) {
             float w = tex.width  * FRUIT_SCALE;
             float h = tex.height * FRUIT_SCALE;
 
-            Rectangle dst = { f->x, f->y, w, h };
+            Rectangle dst = { f->x - camOffsetX, f->y - camOffsetY, w, h };
             Vector2 origin = { w / 2.0f, h / 2.0f };
 
             DrawTexturePro(tex, src, dst, origin, 0.0f, WHITE);
         } else {
-            DrawCircle((int)f->x, (int)f->y, 8, YELLOW);
+            DrawCircle((int)(f->x - camOffsetX), (int)(f->y - camOffsetY), 8, YELLOW);
         }
     }
     
@@ -1219,21 +1367,21 @@ static void render_game(Texture2D stageTex) {
         for (int i = 0; i < NUM_PLATAFORMAS; i++) {
             const PlataformaDef *p = &PLATAFORMAS[i];
 
-            DrawLine((int)p->xLeft, (int)p->y, (int)p->xRight, (int)p->y,
+            DrawLine((int)(p->xLeft - camOffsetX), (int)(p->y - camOffsetY), (int)(p->xRight - camOffsetX), (int)(p->y - camOffsetY),
                      Fade(RED, 0.7f));
 
             float midX = (p->xLeft + p->xRight) * 0.5f;
-            DrawText(TextFormat("P%d", i), (int)midX - 10, (int)p->y - 15, 14, RED);
+            DrawText(TextFormat("P%d", i), (int)midX - 10 - (int)camOffsetX, (int)p->y - 15 - (int)camOffsetY, 14, RED);
         }
 
         // Dibujar LIANAS como segmentos verticales
         for (int j = 0; j < NUM_LIANAS; j++) {
             const LianaDef *l = &LIANAS[j];
 
-            DrawLine((int)l->x, (int)l->yTop, (int)l->x, (int)l->yBottom,
+            DrawLine((int)(l->x - camOffsetX), (int)(l->yTop - camOffsetY), (int)(l->x - camOffsetX), (int)(l->yBottom - camOffsetY),
                      Fade(BLUE, 0.7f));
 
-            DrawText(TextFormat("L%d", j), (int)l->x - 10, (int)l->yTop - 20, 14, BLUE);
+            DrawText(TextFormat("L%d", j), (int)(l->x - 10 - camOffsetX), (int)(l->yTop - 20 - camOffsetY), 14, BLUE);
         }
     }
     
@@ -1273,8 +1421,24 @@ static void render_game(Texture2D stageTex) {
 // -------------------------
 int main(int argc, char *argv[]) {
     // Permitir nombre de jugador como argumento
-    if (argc > 1) {
-        strncpy(g_playerName, argv[1], sizeof(g_playerName) - 1);
+    // Parsear argumentos simples:
+    // - Si se pasa solo un argumento, se toma como nombre de jugador.
+    // - Si se pasa '--mirror <playerName>' se activa modo espejo y se usa
+    //   el segundo parámetro como objetivo (ej. "Jugador1").
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--mirror") == 0 && i + 1 < argc) {
+            // activar modo espejo
+            g_spectatorMirrorMode = true;
+            g_isSpectator = true;
+            strncpy(g_spectatorTarget, argv[i+1], sizeof(g_spectatorTarget)-1);
+            g_spectatorTarget[sizeof(g_spectatorTarget)-1] = '\0';
+            i++; // saltar el parámetro
+        } else if (strncmp(argv[i], "--", 2) == 0) {
+            // otros flags desconocidos: ignorar
+        } else if (strlen(argv[i]) > 0) {
+            // si no es flag, tomar como nombre de jugador (por compatibilidad)
+            strncpy(g_playerName, argv[i], sizeof(g_playerName) - 1);
+        }
     }
     
     printf("╔════════════════════════════════════════════╗\n");
@@ -1282,6 +1446,10 @@ int main(int argc, char *argv[]) {
     printf("╚════════════════════════════════════════════╝\n");
     printf("Jugador: %s\n\n", g_playerName);
     
+    // Guardar ruta del ejecutable para posibles forks (lanzar espectadores)
+    strncpy(g_execPath, argv[0], sizeof(g_execPath)-1);
+    g_execPath[sizeof(g_execPath)-1] = '\0';
+
     // Inicializar GameState
     memset(&g_state, 0, sizeof(GameState));
     pthread_mutex_init(&g_state.mutex, NULL);
@@ -1306,6 +1474,93 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     
+    // ===== Selección de rol (Interfaz gráfica previa) =====
+    // Iniciamos una ventana temporal (se reutilizará para el juego) y
+    // mostramos botones para elegir: Jugador1, Jugador2, Espectador->J1,
+    // Espectador->J2.
+    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Cliente C - Selección");
+    SetTargetFPS(TARGET_FPS);
+
+    bool chosen = false;
+    int menuChoice = 0; // 1=J1,2=J2,3=Spec->J1,4=Spec->J2
+
+    const int btnW = 360;
+    const int btnH = 64;
+    const int startY = 180;
+
+    while (!chosen && !WindowShouldClose()) {
+        BeginDrawing();
+        ClearBackground(RAYWHITE);
+
+        DrawText("Selecciona modo:", 20, 40, 30, DARKGREEN);
+
+        Vector2 mouse = GetMousePosition();
+        int cx = SCREEN_WIDTH/2 - btnW/2;
+
+        Rectangle r1 = (Rectangle){ cx, startY + 0*(btnH+16), btnW, btnH };
+        Rectangle r2 = (Rectangle){ cx, startY + 1*(btnH+16), btnW, btnH };
+        Rectangle r3 = (Rectangle){ cx, startY + 2*(btnH+16), btnW, btnH };
+        Rectangle r4 = (Rectangle){ cx, startY + 3*(btnH+16), btnW, btnH };
+
+        // Hover
+        Color c1 = CheckCollisionPointRec(mouse, r1) ? Fade(DARKBLUE,0.9f) : Fade(SKYBLUE,0.6f);
+        Color c2 = CheckCollisionPointRec(mouse, r2) ? Fade(DARKBLUE,0.9f) : Fade(SKYBLUE,0.6f);
+        Color c3 = CheckCollisionPointRec(mouse, r3) ? Fade(DARKBLUE,0.9f) : Fade(SKYBLUE,0.6f);
+        Color c4 = CheckCollisionPointRec(mouse, r4) ? Fade(DARKBLUE,0.9f) : Fade(SKYBLUE,0.6f);
+
+        DrawRectangleRec(r1, c1);
+        DrawRectangleRec(r2, c2);
+        DrawRectangleRec(r3, c3);
+        DrawRectangleRec(r4, c4);
+
+        DrawText("Jugador 1", (int)(r1.x + 20), (int)(r1.y + 18), 24, WHITE);
+        DrawText("Jugador 2", (int)(r2.x + 20), (int)(r2.y + 18), 24, WHITE);
+        DrawText("Espectador -> Mirar Jugador1", (int)(r3.x + 20), (int)(r3.y + 18), 24, WHITE);
+        DrawText("Espectador -> Mirar Jugador2", (int)(r4.x + 20), (int)(r4.y + 18), 24, WHITE);
+
+        DrawText("Haz click en una opción o pulsa 1-4.", 20, SCREEN_HEIGHT - 40, 16, DARKGRAY);
+
+        // Click handling
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            if (CheckCollisionPointRec(mouse, r1)) { menuChoice = 1; chosen = true; }
+            else if (CheckCollisionPointRec(mouse, r2)) { menuChoice = 2; chosen = true; }
+            else if (CheckCollisionPointRec(mouse, r3)) { menuChoice = 3; chosen = true; }
+            else if (CheckCollisionPointRec(mouse, r4)) { menuChoice = 4; chosen = true; }
+        }
+        if (IsKeyPressed(KEY_ONE))  { menuChoice = 1; chosen = true; }
+        if (IsKeyPressed(KEY_TWO))  { menuChoice = 2; chosen = true; }
+        if (IsKeyPressed(KEY_THREE)){ menuChoice = 3; chosen = true; }
+        if (IsKeyPressed(KEY_FOUR)) { menuChoice = 4; chosen = true; }
+
+        EndDrawing();
+    }
+
+    // Si cerraron la ventana desde la selección, salir
+    if (WindowShouldClose() && !chosen) {
+        CloseWindow();
+        return 0;
+    }
+
+    // Aplicar elección
+    if (menuChoice == 1) {
+        g_isSpectator = false;
+        strncpy(g_playerName, "Jugador1", sizeof(g_playerName)-1);
+    } else if (menuChoice == 2) {
+        g_isSpectator = false;
+        strncpy(g_playerName, "Jugador2", sizeof(g_playerName)-1);
+    } else if (menuChoice == 3) {
+        g_isSpectator = true;
+        strncpy(g_spectatorTarget, "Jugador1", sizeof(g_spectatorTarget)-1);
+        g_spectatorMirrorMode = true;
+    } else if (menuChoice == 4) {
+        g_isSpectator = true;
+        strncpy(g_spectatorTarget, "Jugador2", sizeof(g_spectatorTarget)-1);
+        g_spectatorMirrorMode = true;
+    }
+
+    // Ajustar título de la ventana para el juego
+    SetWindowTitle("Cliente C - Java Server");
+
     // =======================================
     // PASO 2: Conectar
     // =======================================
@@ -1328,12 +1583,23 @@ int main(int argc, char *argv[]) {
         close(g_sock);
         return 1;
     }
+
+    // Enviar rol al servidor (PLAYER o ESPECTADOR) usando la selección previa
+    if (g_isSpectator) {
+        int choice = 1;
+        if (strncmp(g_spectatorTarget, "Jugador", 7) == 0) {
+            // extraer dígito final si existe
+            int v = atoi(g_spectatorTarget + 7);
+            if (v == 1 || v == 2) choice = v;
+        }
+        send_paquete("ROLE", "ESPECTADOR", (float)choice, 0.0f);
+        printf("Conectado como ESPECTADOR mirando %s\n", g_spectatorTarget[0] ? g_spectatorTarget : "Jugador1");
+    } else {
+        send_paquete("ROLE", "JUGADOR", 0.0f, 0.0f);
+        printf("Conectado como JUGADOR\n");
+    }
     
-    // =======================================
-    // PASO 4: Inicializar Raylib
-    // =======================================
-    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Cliente C - Java Server");
-    SetTargetFPS(TARGET_FPS);
+    // Nota: la ventana Raylib ya fue inicializada para la selección previa.
     
     // Texturas locales
     Texture2D playerTex = {0};

@@ -205,7 +205,10 @@ public class GameState {
 
         List<FruitState> frutasAEliminar = new ArrayList<>();
 
-        for (PlayerState p : jugadores.values()) {
+    // DEBUG flag temporal para imprimir info detallada de colisiones
+    final boolean DEBUG_COLLISIONS = true;
+
+    for (PlayerState p : jugadores.values()) {
             float px = p.x;
             float py = p.y;
 
@@ -226,21 +229,44 @@ public class GameState {
                 for (EnemyState e : enemigos) {
                     float dx = e.x - px;
                     float dy = e.y - py;
-                    float dist2 = dx * dx + dy * dy;
 
                     // USAR RADIO AJUSTADO
                     float minDist = ENEMY_RADIUS + playerRadius;
-                    
-                    if (dist2 < minDist * minDist) {
-                        chocaEnemigo = true;
-                        
-                        // LOG MEJORADO
-                        String estado = p.trepando ? "TREPANDO" : "NORMAL";
-                        System.out.println("[COLISION] " + p.playerName + 
-                                        " [" + estado + "] golpeado por " + e.tipo + 
-                                        " | dist=" + String.format("%.1f", Math.sqrt(dist2)) +
-                                        " | pos=(" + String.format("%.1f,%.1f", px, py) + ")");
-                        break;
+
+                    if (p.trepando) {
+                        // Cuando el jugador está trepando, la distancia vertical puede ser
+                        // mayor (está sobre la liana). Para que los enemigos puedan golpear
+                        // en la liana, comprobamos separación horizontal y una tolerancia
+                        // vertical específica en lugar de la distancia euclidiana completa.
+                        final float VERTICAL_TOLERANCE_TREPAR = 40.0f; // px
+                        boolean hitTrepar = (Math.abs(dx) <= minDist && Math.abs(dy) <= VERTICAL_TOLERANCE_TREPAR);
+                        if (hitTrepar) {
+                            chocaEnemigo = true;
+                            String estado = "TREPANDO";
+                            System.out.println("[COLISION] " + p.playerName + 
+                                    " [" + estado + "] golpeado por " + e.tipo + 
+                                    " | dx=" + String.format("%.1f", Math.abs(dx)) +
+                                    " dy=" + String.format("%.1f", Math.abs(dy)) +
+                                    " | pos=(" + String.format("%.1f,%.1f", px, py) + ")");
+                            break;
+                        } else if (DEBUG_COLLISIONS) {
+                            // Imprimir información detallada para debug cuando no encaja
+                            System.out.println("[DEBUG-COL] " + p.playerName + " trepando - enemigo " + e.tipo +
+                                    " | p=(" + String.format("%.1f,%.1f", px, py) + ") e=(" + String.format("%.1f,%.1f", e.x, e.y) + ")" +
+                                    " | dx=" + String.format("%.1f", dx) + " dy=" + String.format("%.1f", dy) +
+                                    " | minDist=" + String.format("%.1f", minDist) + " V_TOL=" + VERTICAL_TOLERANCE_TREPAR);
+                        }
+                    } else {
+                        float dist2 = dx * dx + dy * dy;
+                        if (dist2 < minDist * minDist) {
+                            chocaEnemigo = true;
+                            String estado = "NORMAL";
+                            System.out.println("[COLISION] " + p.playerName + 
+                                    " [" + estado + "] golpeado por " + e.tipo + 
+                                    " | dist=" + String.format("%.1f", Math.sqrt(dist2)) +
+                                    " | pos=(" + String.format("%.1f,%.1f", px, py) + ")");
+                            break;
+                        }
                     }
                 }
             }
@@ -385,6 +411,43 @@ public class GameState {
             p.estadoMovimiento = "CAMINANDO";
         }
         
+        this.timestamp = System.currentTimeMillis();
+    }
+
+    /**
+     * Variante que recibe la Y propuesta por el cliente para sincronizar la posición
+     * al iniciar el trepar. El servidor la clampa dentro del rango de la liana.
+     */
+    public void actualizarEstadoTrepar(String playerName, boolean intentaTrepar, float x, float y) {
+        PlayerState p = jugadores.get(playerName);
+        if (p == null) return;
+
+        if (intentaTrepar) {
+            // Detectar liana cercana usando la X/Y propuestas por el cliente
+            int lianaIndex = detectarLianaCercana(x, y);
+
+            if (lianaIndex >= 0) {
+                p.trepando = true;
+                p.lianaActual = lianaIndex;
+                p.estadoMovimiento = "TREPANDO";
+
+                // Ajustar X para centrar en la liana
+                LayoutDKJr.LianaDef liana = LayoutDKJr.getLiana(lianaIndex);
+                p.x = liana.x;
+
+                // Clampear la Y dentro de la liana
+                if (y < liana.yTop) p.y = liana.yTop;
+                else if (y > liana.yBottom) p.y = liana.yBottom;
+                else p.y = y;
+            }
+        } else {
+            p.trepando = false;
+            p.lianaActual = -1;
+            p.estadoMovimiento = "CAMINANDO";
+            // Actualizar la Y del jugador al valor proporcionado por el cliente
+            p.y = y;
+        }
+
         this.timestamp = System.currentTimeMillis();
     }
 

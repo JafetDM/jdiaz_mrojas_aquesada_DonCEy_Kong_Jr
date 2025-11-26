@@ -45,6 +45,8 @@ public class GameServer {
 
     // Cooldown de daño por enemigo para cada jugador (en milisegundos)
     private final Map<String, Long> ultimoGolpeEnemigo = new ConcurrentHashMap<>();
+    // Mapa de espectador -> jugador objetivo (playerName)
+    private final Map<String, String> spectatorTarget = new ConcurrentHashMap<>();
     
     public GameServer(int port) {
         this.port = port;
@@ -129,33 +131,33 @@ public class GameServer {
                 Socket clientSocket = serverSocket.accept();
 
                 // ============================
-                // Límite global: máximo 2 jugadores
-                // ============================
-                if (getTotalClientes() >= 2) {
-                    System.out.println("[!] Conexión rechazada: máximo de 2 jugadores alcanzado.");
+                    // Límite global: máximo 6 conexiones (2 jugadores + hasta 4 espectadores)
+                    // ============================
+                    if (getTotalClientes() >= 6) {
+                        System.out.println("[!] Conexión rechazada: máximo de 6 conexiones alcanzado.");
 
-                    try (DataOutputStream tempOut = new DataOutputStream(
-                            new BufferedOutputStream(clientSocket.getOutputStream()))) {
+                        try (DataOutputStream tempOut = new DataOutputStream(
+                                new BufferedOutputStream(clientSocket.getOutputStream()))) {
 
-                        Paquete pError = new Paquete("ERROR", "Server", 0, 0);
-                        pError.datos = "Servidor lleno: máximo 2 jugadores activos.";
-                        String jsonError = pError.toJson();
+                            Paquete pError = new Paquete("ERROR", "Server", 0, 0);
+                            pError.datos = "Servidor lleno: máximo 6 conexiones (2 jugadores + 4 espectadores).";
+                            String jsonError = pError.toJson();
 
-                        tempOut.writeUTF(jsonError);
-                        tempOut.flush();
-                    } catch (IOException ioe) {
-                        System.err.println("[ERROR] Al enviar mensaje de servidor lleno: " + ioe.getMessage());
+                            tempOut.writeUTF(jsonError);
+                            tempOut.flush();
+                        } catch (IOException ioe) {
+                            System.err.println("[ERROR] Al enviar mensaje de servidor lleno: " + ioe.getMessage());
+                        }
+
+                        clientSocket.close();
+                        continue; // seguir esperando otra conexión
                     }
 
-                    clientSocket.close();
-                    continue; // seguir esperando otra conexión
-                }
+                    // Si hay espacio, seguimos normal
+                    playerCount++;
+                    String playerName = "Jugador" + playerCount;
 
-                // Si hay espacio, seguimos normal
-                playerCount++;
-                String playerName = "Jugador" + playerCount;
-
-                // Asignar evento: jugadores impares al JUEGO_1, pares al JUEGO_2
+                    // Asignar evento: jugadores impares al JUEGO_1, pares al JUEGO_2
                 Evento evento = (playerCount % 2 == 1) ? Evento.JUEGO_1 : Evento.JUEGO_2;
                 
                 System.out.println("\n[+] " + playerName + " conectado desde " 
@@ -167,24 +169,10 @@ public class GameServer {
                 clients.add(handler);
                 subscribe(handler);
 
-                // Posición inicial DK Jr en plataforma 0
-                EventPublisher publisher = publishers.get(evento);
-                if (publisher != null) {
-                    GameState gameState = publisher.getGameState();
-                    if (gameState != null) {
-                        // Plataforma 0 -> lo ponemos en el centro de esa plataforma
-                        LayoutDKJr.PlataformaDef p0 = LayoutDKJr.getPlataforma(0);
-                        float spawnX = LayoutDKJr.getXCentroPlataforma(0);
-                        float spawnY = p0.y - 20.0f;  // un poquito encima de la plataforma
-
-                        // Registrar al jugador en el estado del juego de este evento
-                        gameState.actualizarJugador(playerName, spawnX, spawnY);
-
-                        // Mandar al cliente su posición inicial inmediata
-                        Paquete spawn = new Paquete("MOVIMIENTO", playerName, spawnX, spawnY);
-                        handler.sendPacket(spawn);
-                    }
-                }
+                // Nota: No registramos automáticamente al jugador aquí porque no
+                // sabemos aún si la conexión será de un jugador o un espectador.
+                // El registro del jugador se realizará cuando reciba el paquete
+                // ROLE desde el cliente (JUGADOR/ESPECTADOR).
 
                 // Iniciar thread del handler PRIMERO
                 new Thread(handler).start();
@@ -312,16 +300,115 @@ public class GameServer {
 
         // Procesar según el tipo de paquete
         switch (paquete.tipo) {
+            case "ROLE":
+                // Cliente indica su rol: "JUGADOR" o "ESPECTADOR"
+                if (paquete.movimiento != null && paquete.movimiento.equalsIgnoreCase("ESPECTADOR")) {
+                    System.out.println("[ROLE] " + paquete.playerName + " solicitó ESPECTADOR");
+                    // Registrar como espectador sólo si el cupo por jugador no está lleno
+                    if (publisher != null) {
+                        GameState gs = publisher.getGameState();
+                        if (gs != null) {
+                            // Mapear índice fijo 1->Jugador1, 2->Jugador2
+                            int requestedIndex = (int) Math.round(paquete.x);
+                            String targetPlayer = null;
+                            if (requestedIndex == 1 || requestedIndex == 2) {
+                                targetPlayer = "Jugador" + requestedIndex;
+                            }
+
+                            // Verificar si el target existe en el GameState
+                            boolean targetExists = (targetPlayer != null && gs.obtenerJugador(targetPlayer) != null);
+                            if (!targetExists) {
+                                // Si no existe aún, registrar espectador sin objetivo
+                                spectatorTarget.put(paquete.playerName, null);
+                                System.out.println("[ROLE] " + paquete.playerName + " registrado como espectador (objetivo no disponible: " + targetPlayer + ")");
+                                Paquete ok = new Paquete("BIENVENIDA", "Server", 0, 0);
+                                ok.datos = "Conectado como ESPECTADOR (objetivo no disponible yet)";
+                                sender.sendPacket(ok);
+                            } else {
+                                // Contar cuantos espectadores ya miran a ese jugador
+                                int count = 0;
+                                for (String v : spectatorTarget.values()) {
+                                    if (targetPlayer.equals(v)) count++;
+                                }
+
+                                if (count >= 2) {
+                                    Paquete err = new Paquete("ERROR", "Server", 0, 0);
+                                    err.datos = "Máximo de espectadores para ese jugador alcanzado";
+                                    sender.sendPacket(err);
+                                    System.out.println("[ROLE] Rechazado espectador " + paquete.playerName + " para objetivo " + targetPlayer);
+                                } else {
+                                    spectatorTarget.put(paquete.playerName, targetPlayer);
+                                    Paquete ok = new Paquete("BIENVENIDA", "Server", 0, 0);
+                                    ok.datos = "Conectado como ESPECTADOR mirando a " + targetPlayer;
+                                    sender.sendPacket(ok);
+                                    System.out.println("[ROLE] " + paquete.playerName + " es espectador de " + targetPlayer);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Solicita ser jugador
+                    System.out.println("[ROLE] " + paquete.playerName + " solicitó JUGADOR");
+                    if (publisher != null) {
+                        GameState gs = publisher.getGameState();
+                        if (gs != null) {
+                            int playersCount = gs.obtenerJugadores().size();
+                            if (playersCount >= 2) {
+                                // Rechazar como jugador: convertir a espectador por defecto
+                                Paquete err = new Paquete("ERROR", "Server", 0, 0);
+                                err.datos = "Máximo de jugadores alcanzado. Se le asignó rol de espectador.";
+                                sender.sendPacket(err);
+
+                                // Registrar como espectador con target al primer jugador
+                                java.util.List<String> playerNames = new ArrayList<>(gs.obtenerJugadores().keySet());
+                                String target = playerNames.isEmpty() ? null : playerNames.get(0);
+                                spectatorTarget.put(paquete.playerName, target);
+                                System.out.println("[ROLE] " + paquete.playerName + " forzado a espectador");
+                            } else {
+                                // Aceptar como jugador: registrar en GameState y enviar spawn
+                                LayoutDKJr.PlataformaDef p0 = LayoutDKJr.getPlataforma(0);
+                                float spawnX = LayoutDKJr.getXCentroPlataforma(0);
+                                float spawnY = p0.y - 20.0f;
+                                gs.actualizarJugador(paquete.playerName, spawnX, spawnY);
+
+                                Paquete ok = new Paquete("BIENVENIDA", "Server", 0, 0);
+                                ok.datos = "Conectado como JUGADOR";
+                                sender.sendPacket(ok);
+
+                                Paquete spawn = new Paquete("MOVIMIENTO", paquete.playerName, spawnX, spawnY);
+                                sender.sendPacket(spawn);
+                                System.out.println("[ROLE] " + paquete.playerName + " confirmado como jugador y registrado en GameState");
+                            }
+                        }
+                    }
+                }
+                break;
             case "TREPAR":
                 // El cliente indica que quiere trepar
-                gameState.actualizarEstadoTrepar(paquete.playerName, true);
-                publisher.notifySubscribers(paquete);
+                // Pasamos la X/Y enviada por el cliente para sincronizar posición en la liana
+                gameState.actualizarEstadoTrepar(paquete.playerName, true, paquete.x, paquete.y);
+                // Enviar inmediatamente un paquete MOVIMIENTO con la posición autoritativa
+                GameState.PlayerState jugadorTrepar = gameState.obtenerJugador(paquete.playerName);
+                if (jugadorTrepar != null) {
+                    Paquete movT = Paquete.crearMovimiento(paquete.playerName, "QUIETO", jugadorTrepar.x, jugadorTrepar.y);
+                    publisher.notifySubscribers(movT);
+                } else {
+                    publisher.notifySubscribers(paquete);
+                }
                 break;
 
             case "SOLTAR_LIANA":
-                // El cliente suelta la liana
-                gameState.actualizarEstadoTrepar(paquete.playerName, false);
-                publisher.notifySubscribers(paquete);
+                // El cliente suelta la liana -> pasar la X/Y del cliente para sincronizar
+                // Usamos la variante que recibe (playerName, intentaTrepar, x, y)
+                gameState.actualizarEstadoTrepar(paquete.playerName, false, paquete.x, paquete.y);
+                // Además, notificar inmediatamente un paquete MOVIMIENTO con la nueva posición
+                GameState.PlayerState jugadorSoltado = gameState.obtenerJugador(paquete.playerName);
+                if (jugadorSoltado != null) {
+                    Paquete mov = Paquete.crearMovimiento(paquete.playerName, "QUIETO", jugadorSoltado.x, jugadorSoltado.y);
+                    publisher.notifySubscribers(mov);
+                } else {
+                    publisher.notifySubscribers(paquete);
+                }
                 break;
 
             case "MOVER_EN_LIANA":
@@ -479,6 +566,11 @@ public class GameServer {
         EventPublisher publisher = publishers.get(evento);
         if (publisher != null) {
             publisher.eliminarJugador(client.getPlayerName());
+        }
+        
+        // También eliminar si era espectador registrado
+        if (spectatorTarget.containsKey(client.getPlayerName())) {
+            spectatorTarget.remove(client.getPlayerName());
         }
         
         System.out.println("[-] " + client.getPlayerName() + " desconectado de " + evento);
