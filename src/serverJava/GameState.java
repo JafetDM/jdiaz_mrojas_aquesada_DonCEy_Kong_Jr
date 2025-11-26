@@ -119,11 +119,15 @@ public class GameState {
         public boolean trepando;      // está trepando?
         public int lianaActual;       // índice de liana (-1 si no está en ninguna)
         public String estadoMovimiento; // "CAMINANDO", "TREPANDO", "CAYENDO", "SALTANDO"
+        public long invulnerableHastaMs;
+        public boolean recienRespawneado;
         
         public PlayerState() {
             this.trepando = false;
             this.lianaActual = -1;
             this.estadoMovimiento = "CAMINANDO";
+            this.recienRespawneado = false;
+            this.invulnerableHastaMs = 0L;
         }
     }
 
@@ -215,10 +219,22 @@ public class GameState {
             // AJUSTAR RADIO DE COLISIÓN SEGÚN SI ESTÁ TREPANDO
             float playerRadius = p.trepando ? PLAYER_RADIUS_TREPAR : PLAYER_RADIUS_NORMAL;
 
+            if (p.recienRespawneado) {
+                float margenSeguro = 30.0f; // píxeles por encima del límite de caída
+                // Si ya está en zona segura (bien por encima del límite), le quitamos la protección
+                if (py < (fallLimitY - margenSeguro)) {
+                    p.recienRespawneado = false;
+                } else {
+                    // Sigue con coordenadas "raras" (por paquetes viejos de caída),
+                    // saltamos toda la lógica de daño en este frame
+                    continue;
+                }
+            }
             // Cooldown de daño
             Long lastHit = ultimoDaño.get(p.playerName);
             long elapsed = (lastHit == null) ? Long.MAX_VALUE : (now - lastHit);
-            boolean puedeRecibirDaño = elapsed > HIT_COOLDOWN_MS;
+            boolean invulnerable = (now < p.invulnerableHastaMs);
+            boolean puedeRecibirDaño = !invulnerable && (elapsed > HIT_COOLDOWN_MS);
 
             //  DETECTAR CAÍDA AL VACÍO
             boolean caida = (py > fallLimitY);
@@ -309,6 +325,7 @@ public class GameState {
                 if (p.vida <= 0) {
                     p.vida = 3;
                     p.puntos = 0;
+                    p.invulnerableHastaMs = now + 2000L;
                     System.out.println("[GAME OVER] " + p.playerName + 
                                     " -> vidas=3, puntos=0 (RESET COMPLETO)");
                 }
@@ -319,6 +336,8 @@ public class GameState {
                 
                 p.x = spawnX;
                 p.y = spawnY;
+
+                p.recienRespawneado = true;
                 
                 // 4) Resetear estado de movimiento
                 p.trepando = false;

@@ -14,6 +14,9 @@
 #define MOVE_SPEED 220.0f   // píxeles / s
 #define JUMP_SPEED -320.0f  // píxeles / s (negativo = hacia arriba)
 
+// Índice de la plataforma objetivo para respawn
+#define PLATFORM_GOAL_INDEX 10 
+
 // Librerías estándar
 #include <math.h> 
 #include <stdio.h>
@@ -44,6 +47,12 @@ typedef enum {
     ESTADO_CAYENDO,
     ESTADO_SALTANDO
 } EstadoJugador;
+
+typedef enum {
+    GAME_MODE_JUGANDO,
+    GAME_MODE_VICTORIA,
+    GAME_MODE_DERROTA
+} GameMode;
 
 typedef struct {
     char playerName[64];
@@ -96,6 +105,7 @@ typedef struct {
 // ========================
 static void parse_game_state_json(const char *jsonText);
 static void parse_paquete_json(const char *jsonText);
+static GameMode g_gameMode = GAME_MODE_JUGANDO;
 
 // Funciones de física y movimiento
 static float get_player_half_height(void);
@@ -136,6 +146,12 @@ static bool g_spectatorMirrorMode = false;
 
 // Ruta/executable usada para lanzar instancias espejo (copiada de argv[0])
 static char g_execPath[512] = "./cliente";
+
+// Flag para saber si, siendo espectador, perdimos conexión con el jugador que estábamos viendo
+static bool g_spectatorConnectionLost = false;
+// Nombre del jugador que se desconectó (solo informativo)
+static char g_spectatorLostName[64] = "";
+
 
 // Lanzar un nuevo proceso cliente en modo espejo para este jugador
 static void launch_spectator_instance(const char *playerName) {
@@ -340,8 +356,22 @@ static void parse_paquete_json(const char *jsonText) {
     }
     else if (strcmp(tipoStr, "DESCONEXION") == 0) {
         cJSON *pname = cJSON_GetObjectItem(root, "playerName");
-        if (pname) {
-            printf("[DESCONEXION] %s se desconectó\n", pname->valuestring);
+        if (pname && cJSON_IsString(pname)) {
+            const char *desconectado = pname->valuestring;
+            printf("[DESCONEXION] %s se desconectó\n", desconectado);
+
+            // Si somos ESPECTADOR del jugador que se acaba de desconectar,
+            // activamos la pantalla de "Conexión perdida"
+            if (g_isSpectator &&
+                g_spectatorTarget[0] != '\0' &&
+                strcmp(desconectado, g_spectatorTarget) == 0) {
+
+                g_spectatorConnectionLost = true;
+                strncpy(g_spectatorLostName, desconectado, sizeof(g_spectatorLostName) - 1);
+                g_spectatorLostName[sizeof(g_spectatorLostName) - 1] = '\0';
+
+                printf("[INFO] Conexión perdida con el jugador observado: %s\n", g_spectatorLostName);
+            }
         }
     }
     else if (strcmp(tipoStr, "ERROR") == 0) {
@@ -938,6 +968,30 @@ static void send_input_from_keys(void) {
         }
         return;
     }
+
+    // Si estamos en pantalla de victoria/derrota, solo procesamos teclas del menú
+    if (g_gameMode == GAME_MODE_VICTORIA) {
+        // Seguir jugando (volver al juego)
+        if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE)) {
+            g_gameMode = GAME_MODE_JUGANDO;
+        }
+        // Salir del juego
+        if (IsKeyPressed(KEY_Q) || IsKeyPressed(KEY_ESCAPE)) {
+            g_running = false;
+        }
+        return;
+    } else if (g_gameMode == GAME_MODE_DERROTA) {
+        // Y = seguir jugando (ya tenés la lógica de respawn en el servidor/cliente)
+        if (IsKeyPressed(KEY_Y)) {
+            g_gameMode = GAME_MODE_JUGANDO;
+        }
+        // N o ESC = salir
+        if (IsKeyPressed(KEY_N) || IsKeyPressed(KEY_ESCAPE)) {
+            g_running = false;
+        }
+        return;
+    }
+
     // Asegurar posición inicial
     init_player_start_position();
 
@@ -1055,6 +1109,21 @@ static void send_input_from_keys(void) {
         respawn_player();
     }
 
+    // ===== Comprobar condición de victoria: llegar a la plataforma P10 =====
+    if (!g_isSpectator && g_gameMode == GAME_MODE_JUGANDO) {
+        const int goalIndex = PLATFORM_GOAL_INDEX; // P10
+        const PlataformaDef *goal = &PLATAFORMAS[goalIndex];
+
+        float halfH = get_player_half_height();
+        float feetY = g_playerY + halfH;
+        const float tolY = 6.0f; // similar a la tolerancia de colisión con plataformas
+
+        if (g_playerX >= goal->xLeft && g_playerX <= goal->xRight &&
+            fabsf(feetY - goal->y) <= tolY) {
+            g_gameMode = GAME_MODE_VICTORIA;
+            printf("[GAME] Victoria: jugador alcanzó la plataforma P10\n");
+        }
+    }
 
     // Enviar al servidor solo si cambió
     static float lastX = 0.0f;
@@ -1073,16 +1142,19 @@ static void send_input_from_keys(void) {
 }
 
 
+
 // -------------------------
 // Renderizar estado del juego
 // -------------------------
 static void render_game(Texture2D stageTex) {
+    // Variables estáticas para detectar cambios de vidas entre frames
+    static int s_lastVidaHUD = -1;
+    static int s_lastPuntosHUD = 0;
+
     BeginDrawing();
     ClearBackground(RAYWHITE);
     
-    // Render del stage: si estamos en modo espejo (espectador lanzado con
-    // --mirror), dibujamos la ventana centrada en el jugador objetivo;
-    // en caso contrario, dibujamos el stage completo escalado a la pantalla.
+    // Render del stage (igual que antes) -------------------------------
     Rectangle srcStage = { 0, 0, 0, 0 };
     if (g_spectatorMirrorMode && g_spectatorTarget[0] != '\0') {
         float camCenterX = g_playerX;
@@ -1105,7 +1177,6 @@ static void render_game(Texture2D stageTex) {
             float camX = camCenterX - ((float)SCREEN_WIDTH * 0.5f);
             float camY = camCenterY - ((float)SCREEN_HEIGHT * 0.5f);
 
-            // Asegurarnos de no pedir una región fuera del tamaño de la textura.
             float viewW = SCREEN_WIDTH;
             float viewH = SCREEN_HEIGHT;
             if (viewW > texW) viewW = texW;
@@ -1114,11 +1185,9 @@ static void render_game(Texture2D stageTex) {
             if (camX < 0) camX = 0;
             if (camY < 0) camY = 0;
             if (camX + viewW > texW) camX = texW - viewW;
+            if (camX + viewW < 0) camX = 0;
             if (camY + viewH > texH) camY = texH - viewH;
-            if (camX < 0) camX = 0;
-            if (camY < 0) camY = 0;
 
-            // Usar coordenadas enteras en el source rect para evitar artefactos
             srcStage.x = (float)((int)camX);
             srcStage.y = (float)((int)camY);
             srcStage.width  = (float)((int)viewW);
@@ -1139,50 +1208,35 @@ static void render_game(Texture2D stageTex) {
         }
     }
 
-    // Variables de HUD (vidas/puntos del jugador local)
+    // Variables de HUD (vidas/puntos del jugador local O del objetivo si somos espectador)
     int vidaLocal = -1;
     int puntosLocal = 0;
+    char nombreHUD[64] = "";
 
     // Indicador visual cuando está trepando
     if (g_playerEstado == ESTADO_TREPANDO && g_lianaActual >= 0) {
         const LianaDef *liana = &LIANAS[g_lianaActual];
-        
-        // Resaltar la liana actual
         DrawLine((int)liana->x, (int)liana->yTop, 
-                (int)liana->x, (int)liana->yBottom,
-                Fade(YELLOW, 0.8f));
-        
-        // Mostrar indicador
+                 (int)liana->x, (int)liana->yBottom,
+                 Fade(YELLOW, 0.8f));
         DrawText("TREPANDO", 10, 110, 20, YELLOW);
         DrawText(TextFormat("Liana: %d", g_lianaActual), 10, 135, 18, YELLOW);
     }
 
-    // Mostrar estado actual
+    // Estado texto
     const char *estadoTexto = "";
     Color estadoColor = WHITE;
     switch (g_playerEstado) {
-        case ESTADO_CAMINANDO:
-            estadoTexto = "CAMINANDO";
-            estadoColor = GREEN;
-            break;
-        case ESTADO_TREPANDO:
-            estadoTexto = "TREPANDO";
-            estadoColor = YELLOW;
-            break;
-        case ESTADO_CAYENDO:
-            estadoTexto = "CAYENDO";
-            estadoColor = ORANGE;
-            break;
-        case ESTADO_SALTANDO:
-            estadoTexto = "SALTANDO";
-            estadoColor = SKYBLUE;
-            break;
+        case ESTADO_CAMINANDO: estadoTexto = "CAMINANDO"; estadoColor = GREEN; break;
+        case ESTADO_TREPANDO:  estadoTexto = "TREPANDO";  estadoColor = YELLOW; break;
+        case ESTADO_CAYENDO:   estadoTexto = "CAYENDO";   estadoColor = ORANGE; break;
+        case ESTADO_SALTANDO:  estadoTexto = "SALTANDO";  estadoColor = SKYBLUE; break;
     }
     DrawText(TextFormat("Estado: %s", estadoTexto), 10, 160, 18, estadoColor);
     
     pthread_mutex_lock(&g_state.mutex);
     
-    // Offset de cámara (copiado de srcStage)
+    // Offset de cámara
     float camOffsetX = 0.0f;
     float camOffsetY = 0.0f;
     if (stageTex.id != 0) {
@@ -1190,31 +1244,31 @@ static void render_game(Texture2D stageTex) {
         camOffsetY = srcStage.y;
     }
 
-    // Dibujar todos los jugadores
+    const char *targetName = g_isSpectator ? g_spectatorTarget : g_playerName;
+
+    // ----- Jugadores -----
     for (int i = 0; i < g_state.totalJugadores; i++) {
         Player *p = &g_state.jugadores[i];
         
-        // ===== JUGADOR LOCAL (YO) =====
-        if (strcmp(p->playerName, g_playerName) == 0 && g_playerTex.id != 0) {
-
-            // HUD local: vidas y puntos desde el SERVIDOR
+        // Actualizar HUD (local u observado)
+        if (strcmp(p->playerName, targetName) == 0) {
             vidaLocal   = p->vida;
             puntosLocal = p->puntos;
+            strncpy(nombreHUD, p->playerName, sizeof(nombreHUD) - 1);
+            nombreHUD[sizeof(nombreHUD) - 1] = '\0';
+        }
+        
+        // Jugador local
+        if (strcmp(p->playerName, g_playerName) == 0 && g_playerTex.id != 0) {
 
-            // ==== SINCRONIZACIÓN SERVER → CLIENTE (suave) ====
             float serverX = p->x;
             float serverY = p->y;
 
             float dx = serverX - g_playerX;
             float dy = serverY - g_playerY;
             float distTotal = sqrtf(dx*dx + dy*dy);
-
-            // No queremos que el servidor nos aplaste mientras TREPAMOS
             bool estoyTrepandoLocal = (g_playerEstado == ESTADO_TREPANDO);
 
-            // Solo corregir en dos casos:
-            //  1) Primer frame (no inicializado)
-            //  2) Desfase MUY grande (típico de respawn / caída al vacío)
             if (!estoyTrepandoLocal && 
                 (!g_playerInitialized || distTotal > 80.0f)) {
 
@@ -1230,53 +1284,52 @@ static void render_game(Texture2D stageTex) {
                 g_playerInitialized = true;
             }
 
-            // ==== DIBUJAR JUGADOR LOCAL USANDO POSICIÓN LOCAL ====
             Rectangle src = (Rectangle){ 0, 0, (float)g_playerTex.width, (float)g_playerTex.height };
-
             float w = g_playerTex.width  * PLAYER_SCALE;
             float h = g_playerTex.height * PLAYER_SCALE;
-
             float drawX = g_playerX - camOffsetX;
             float drawY = g_playerY - camOffsetY;
-
             Rectangle dst = (Rectangle){ drawX, drawY, w, h };
             Vector2 origin = (Vector2){ w / 2.0f, h / 2.0f };
-
             DrawTexturePro(g_playerTex, src, dst, origin, 0.0f, WHITE);
-
-            // Nombre del jugador local
             DrawText(p->playerName, (int)drawX - 20, (int)drawY - 30, 10, BLACK);
 
         } else {
+            // Otros jugadores
             float screenX = p->x - camOffsetX;
             float screenY = p->y - camOffsetY;
-            // ===== OTROS JUGADORES =====
             Color color = GREEN;
-            
-            // Si está trepando, dibujar indicador especial
+
             if (p->trepando) {
                 if (p->lianaActual >= 0 && p->lianaActual < NUM_LIANAS) {
                     const LianaDef *liana = &LIANAS[p->lianaActual];
                     DrawLine((int)(liana->x - camOffsetX), (int)(liana->yTop - camOffsetY),
-                            (int)(liana->x - camOffsetX), (int)(liana->yBottom - camOffsetY),
-                            Fade(YELLOW, 0.3f));
+                             (int)(liana->x - camOffsetX), (int)(liana->yBottom - camOffsetY),
+                             Fade(YELLOW, 0.3f));
                 }
                 color = YELLOW;
                 DrawText("T", (int)screenX - 3, (int)screenY - 40, 16, YELLOW);
             }
-            
-            DrawCircle((int)screenX, (int)screenY, 15, color);
 
-            // Nombre de los otros jugadores
+            if (g_playerTex.id != 0) {
+                Rectangle src = { 0, 0, (float)g_playerTex.width, (float)g_playerTex.height };
+                float w = g_playerTex.width  * PLAYER_SCALE;
+                float h = g_playerTex.height * PLAYER_SCALE;
+                Rectangle dst = { screenX, screenY, w, h };
+                Vector2 origin = { w / 2.0f, h / 2.0f };
+                Color tint = p->trepando ? Fade(YELLOW, 0.8f) : WHITE;
+                DrawTexturePro(g_playerTex, src, dst, origin, 0.0f, tint);
+            } else {
+                DrawCircle((int)screenX, (int)screenY, 15, color);
+            }
+
             DrawText(p->playerName, (int)screenX - 20, (int)screenY - 30, 10, BLACK);
         }
     }
 
-    
-    // Dibujar enemigos
+    // ----- Enemigos -----
     for (int i = 0; i < g_state.totalEnemigos; i++) {
         Enemy *e = &g_state.enemigos[i];
-
         Texture2D tex = (Texture2D){0};
 
         bool isRed  = (strncmp(e->tipo, "CROC_RED", 8)  == 0);
@@ -1284,104 +1337,79 @@ static void render_game(Texture2D stageTex) {
         const char *dir = e->direccion;
 
         if (isRed) {
-            if (strcmp(dir, "UP") == 0 && g_texCrocRedUp.id)
-                tex = g_texCrocRedUp;
-            else if (strcmp(dir, "DOWN") == 0 && g_texCrocRedDown.id)
-                tex = g_texCrocRedDown;
-            else if (strcmp(dir, "LEFT") == 0 && g_texCrocRedLeft.id)
-                tex = g_texCrocRedLeft;
-            else if (strcmp(dir, "RIGHT") == 0 && g_texCrocRedRight.id)
-                tex = g_texCrocRedRight;
+            if (strcmp(dir, "UP") == 0 && g_texCrocRedUp.id)       tex = g_texCrocRedUp;
+            else if (strcmp(dir, "DOWN") == 0 && g_texCrocRedDown.id) tex = g_texCrocRedDown;
+            else if (strcmp(dir, "LEFT") == 0 && g_texCrocRedLeft.id) tex = g_texCrocRedLeft;
+            else if (strcmp(dir, "RIGHT") == 0 && g_texCrocRedRight.id) tex = g_texCrocRedRight;
         } else if (isBlue) {
-            if (strcmp(dir, "UP") == 0 && g_texCrocBlueUp.id)
-                tex = g_texCrocBlueUp;
-            else if (strcmp(dir, "DOWN") == 0 && g_texCrocBlueDown.id)
-                tex = g_texCrocBlueDown;
-            else if (strcmp(dir, "LEFT") == 0 && g_texCrocBlueLeft.id)
-                tex = g_texCrocBlueLeft;
-            else if (strcmp(dir, "RIGHT") == 0 && g_texCrocBlueRight.id)
-                tex = g_texCrocBlueRight;
+            if (strcmp(dir, "UP") == 0 && g_texCrocBlueUp.id)         tex = g_texCrocBlueUp;
+            else if (strcmp(dir, "DOWN") == 0 && g_texCrocBlueDown.id) tex = g_texCrocBlueDown;
+            else if (strcmp(dir, "LEFT") == 0 && g_texCrocBlueLeft.id) tex = g_texCrocBlueLeft;
+            else if (strcmp(dir, "RIGHT") == 0 && g_texCrocBlueRight.id) tex = g_texCrocBlueRight;
         }
 
         if (tex.id != 0) {
             Rectangle src = { 0, 0, (float)tex.width, (float)tex.height };
-
             float texW = (float)tex.width;
             float texH = (float)tex.height;
-
             float mayor = (texW > texH) ? texW : texH;
-
-            float targetSize = ENEMY_TARGET_SIZE_RED; // por defecto rojo
-            if (isBlue) {
-                targetSize = ENEMY_TARGET_SIZE_BLUE;
-            }
-
+            float targetSize = isBlue ? ENEMY_TARGET_SIZE_BLUE : ENEMY_TARGET_SIZE_RED;
             float scale = targetSize / mayor;
-
             float w = texW * scale;
             float h = texH * scale;
-
-            Rectangle dst = (Rectangle){ e->x - camOffsetX, e->y - camOffsetY, w, h };
-            Vector2 origin = (Vector2){ w / 2.0f, h / 2.0f };
-
+            Rectangle dst = { e->x - camOffsetX, e->y - camOffsetY, w, h };
+            Vector2 origin = { w / 2.0f, h / 2.0f };
             DrawTexturePro(tex, src, dst, origin, 0.0f, WHITE);
         } else {
             DrawCircle((int)(e->x - camOffsetX), (int)(e->y - camOffsetY), 10, RED);
         }
     }
-    
-    // Dibujar frutas
+
+    // ----- Frutas -----
     for (int i = 0; i < g_state.totalFrutas; i++) {
         Fruit *f = &g_state.frutas[i];
-
         if (f->recolectada) continue;
 
         Texture2D tex = (Texture2D){0};
-
-        if (strcmp(f->tipo, "MANGO") == 0 && g_texMango.id) {
-            tex = g_texMango;
-        } else if (strcmp(f->tipo, "BANANO") == 0 && g_texBanano.id) {
-            tex = g_texBanano;
-        } else if (strcmp(f->tipo, "MANZANA") == 0 && g_texManzana.id) {
-            tex = g_texManzana;
-        }
+        if (strcmp(f->tipo, "MANGO") == 0 && g_texMango.id)       tex = g_texMango;
+        else if (strcmp(f->tipo, "BANANO") == 0 && g_texBanano.id) tex = g_texBanano;
+        else if (strcmp(f->tipo, "MANZANA") == 0 && g_texManzana.id) tex = g_texManzana;
 
         if (tex.id != 0) {
             Rectangle src = { 0, 0, (float)tex.width, (float)tex.height };
-
             float w = tex.width  * FRUIT_SCALE;
             float h = tex.height * FRUIT_SCALE;
-
             Rectangle dst = { f->x - camOffsetX, f->y - camOffsetY, w, h };
             Vector2 origin = { w / 2.0f, h / 2.0f };
-
             DrawTexturePro(tex, src, dst, origin, 0.0f, WHITE);
         } else {
             DrawCircle((int)(f->x - camOffsetX), (int)(f->y - camOffsetY), 8, YELLOW);
         }
     }
-    
-    // Dibujar layout debug si está activado
+
+    // Layout debug (igual que antes) -----------------------
     if (g_showLayoutDebug) {
-        // Dibujar PLATAFORMAS como segmentos horizontales
         for (int i = 0; i < NUM_PLATAFORMAS; i++) {
             const PlataformaDef *p = &PLATAFORMAS[i];
-
-            DrawLine((int)(p->xLeft - camOffsetX), (int)(p->y - camOffsetY), (int)(p->xRight - camOffsetX), (int)(p->y - camOffsetY),
+            DrawLine((int)(p->xLeft - camOffsetX), (int)(p->y - camOffsetY),
+                     (int)(p->xRight - camOffsetX), (int)(p->y - camOffsetY),
                      Fade(RED, 0.7f));
-
             float midX = (p->xLeft + p->xRight) * 0.5f;
-            DrawText(TextFormat("P%d", i), (int)midX - 10 - (int)camOffsetX, (int)p->y - 15 - (int)camOffsetY, 14, RED);
+            DrawText(TextFormat("P%d", i),
+                     (int)midX - 10 - (int)camOffsetX,
+                     (int)p->y - 15 - (int)camOffsetY,
+                     14, RED);
         }
 
-        // Dibujar LIANAS como segmentos verticales
         for (int j = 0; j < NUM_LIANAS; j++) {
             const LianaDef *l = &LIANAS[j];
-
-            DrawLine((int)(l->x - camOffsetX), (int)(l->yTop - camOffsetY), (int)(l->x - camOffsetX), (int)(l->yBottom - camOffsetY),
+            DrawLine((int)(l->x - camOffsetX), (int)(l->yTop - camOffsetY),
+                     (int)(l->x - camOffsetX), (int)(l->yBottom - camOffsetY),
                      Fade(BLUE, 0.7f));
-
-            DrawText(TextFormat("L%d", j), (int)(l->x - 10 - camOffsetX), (int)(l->yTop - 20 - camOffsetY), 14, BLUE);
+            DrawText(TextFormat("L%d", j),
+                     (int)(l->x - 10 - camOffsetX),
+                     (int)(l->yTop - 20 - camOffsetY),
+                     14, BLUE);
         }
     }
     
@@ -1392,25 +1420,111 @@ static void render_game(Texture2D stageTex) {
     DrawText(TextFormat("Jugadores: %d", g_state.totalJugadores), 10, 35, 20, DARKGREEN);
     DrawText("Flechas: Mover | E: Enemigo | F: Fruta", 10, SCREEN_HEIGHT - 25, 15, DARKGRAY);
 
-    // Información adicional cuando está trepando
     if (g_playerEstado == ESTADO_TREPANDO) {
         DrawRectangle(5, SCREEN_HEIGHT - 80, 390, 50, Fade(BLACK, 0.7f));
         DrawText("TREPANDO - Arriba/Abajo: Subir/Bajar", 10, SCREEN_HEIGHT - 75, 14, YELLOW);
         DrawText("           Izq/Der: Cambiar liana | ESPACIO: Soltar", 
-                10, SCREEN_HEIGHT - 55, 14, YELLOW);
+                 10, SCREEN_HEIGHT - 55, 14, YELLOW);
     }
 
-    DrawText(TextFormat("Vidas: %d", (vidaLocal >= 0 ? vidaLocal : 0)),
-             10, 60, 20, RED);
-    DrawText(TextFormat("Puntos: %d", puntosLocal),
-             10, 85, 20, GOLD);
-             
-    // Grid
+    // ===== Detectar GAME OVER (patrón 1 vida -> reset a 3 y puntos 0) =====
+    if (!g_isSpectator && g_gameMode == GAME_MODE_JUGANDO && vidaLocal >= 0) {
+        if (s_lastVidaHUD != -1) {
+            if (s_lastVidaHUD == 1 && vidaLocal == 3 && puntosLocal == 0) {
+                g_gameMode = GAME_MODE_DERROTA;
+                printf("[GAME] Derrota detectada por reset de vidas (1 -> 3, puntos=0)\n");
+            }
+        }
+    }
+    // Actualizar “últimos” para el siguiente frame
+    if (vidaLocal >= 0) {
+        s_lastVidaHUD   = vidaLocal;
+        s_lastPuntosHUD = puntosLocal;
+    }
+
+    // ===== Mostrar HUD de vidas/puntos =====
+    int vidasMostrar = vidaLocal;
+    if (g_gameMode == GAME_MODE_DERROTA && !g_isSpectator) {
+        // Visualmente mostramos 0 vidas en pantalla de derrota
+        vidasMostrar = 0;
+    }
+    if (vidasMostrar < 0) vidasMostrar = 0;
+
+    if (g_isSpectator && nombreHUD[0] != '\0') {
+        DrawText(TextFormat("Observando: %s", nombreHUD), 10, 60, 18, PURPLE);
+        DrawText(TextFormat("Vidas: %d", vidasMostrar), 10, 85, 20, RED);
+        DrawText(TextFormat("Puntos: %d", puntosLocal), 10, 110, 20, GOLD);
+    } else {
+        DrawText(TextFormat("Vidas: %d", vidasMostrar), 10, 60, 20, RED);
+        DrawText(TextFormat("Puntos: %d", puntosLocal), 10, 85, 20, GOLD);
+    }
+
+    // ===== Pantallas de victoria / derrota =====
+    if (g_gameMode == GAME_MODE_VICTORIA) {
+        DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, Fade(BLACK, 0.7f));
+        const char *titulo = "¡HAS RESCATADO A DONKEY KONG!";
+        int fontSize = 28;
+        int textW = MeasureText(titulo, fontSize);
+        DrawText(titulo, (SCREEN_WIDTH - textW) / 2, SCREEN_HEIGHT / 3, fontSize, GREEN);
+
+        int yBase = SCREEN_HEIGHT / 3 + 60;
+        const char *linea1 = "ENTER o ESPACIO: seguir jugando";
+        const char *linea2 = "Q o ESC: salir del juego";
+
+        DrawText(linea1,
+                 SCREEN_WIDTH / 2 - MeasureText(linea1, 20) / 2,
+                 yBase, 20, RAYWHITE);
+        DrawText(linea2,
+                 SCREEN_WIDTH / 2 - MeasureText(linea2, 20) / 2,
+                 yBase + 30, 20, RAYWHITE);
+
+    } else if (g_gameMode == GAME_MODE_DERROTA) {
+        DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, Fade(BLACK, 0.7f));
+
+        const char *titulo = "GAME OVER";
+        int fontSize = 32;
+        int textW = MeasureText(titulo, fontSize);
+        DrawText(titulo, (SCREEN_WIDTH - textW) / 2, SCREEN_HEIGHT / 3, fontSize, RED);
+
+        int yBase = SCREEN_HEIGHT / 3 + 60;
+        const char *l1 = "Te has quedado sin vidas.";
+        const char *l2 = "Y: seguir jugando (desde el inicio)";
+        const char *l3 = "N o ESC: salir del juego";
+
+        DrawText(l1, SCREEN_WIDTH / 2 - MeasureText(l1, 20) / 2, yBase,       20, RAYWHITE);
+        DrawText(l2, SCREEN_WIDTH / 2 - MeasureText(l2, 20) / 2, yBase + 30,  20, RAYWHITE);
+        DrawText(l3, SCREEN_WIDTH / 2 - MeasureText(l3, 20) / 2, yBase + 60,  20, RAYWHITE);
+    }
+
+    // Grid de depuración
     for (int x = 0; x < SCREEN_WIDTH; x += 32)
         DrawLine(x, 0, x, SCREEN_HEIGHT, Fade(GREEN, 0.15f));
     for (int y = 0; y < SCREEN_HEIGHT; y += 32)
         DrawLine(0, y, SCREEN_WIDTH, y, Fade(GREEN, 0.15f));
-    
+
+    // ---------------------------------------------------
+    // PANTALLA PARA ESPECTADORES CUANDO SE PIERDE CONEXIÓN
+    // (se dibuja AL FINAL, por encima de todo)
+    // ---------------------------------------------------
+    if (g_isSpectator && g_spectatorConnectionLost) {
+        int sw = GetScreenWidth();
+        int sh = GetScreenHeight();
+
+        DrawRectangle(0, 0, sw, sh, (Color){ 0, 0, 0, 200 });
+
+        const char *msg1 = "CONEXION PERDIDA CON EL JUGADOR";
+        const char *msg2 = "Presiona ESC para cerrar la ventana";
+
+        int font1 = 32;
+        int font2 = 20;
+
+        int w1 = MeasureText(msg1, font1);
+        int w2 = MeasureText(msg2, font2);
+
+        DrawText(msg1, sw/2 - w1/2, sh/2 - 40, font1, RAYWHITE);
+        DrawText(msg2, sw/2 - w2/2, sh/2 + 10, font2, RAYWHITE);
+    }
+
     EndDrawing();
 }
 

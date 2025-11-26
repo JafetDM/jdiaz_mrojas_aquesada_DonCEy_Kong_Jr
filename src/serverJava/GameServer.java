@@ -463,57 +463,6 @@ public class GameServer {
                     }
                 }
 
-                // 3) COLISIÓN JUGADOR–ENEMIGO
-                {
-                    final float TOLERANCIA_ENEMIGO = 20.0f; // píxeles, ajústalo al tamaño del sprite
-                    final long COOLDOWN_MS = 500;          // 1 segundo entre golpes
-
-                    long ahora = System.currentTimeMillis();
-                    Long ultimoGolpe = ultimoGolpeEnemigo.get(paquete.playerName);
-                    boolean puedeSerGolpeado = (ultimoGolpe == null) ||
-                                               (ahora - ultimoGolpe >= COOLDOWN_MS);
-
-                    if (puedeSerGolpeado) {
-                        // Revisar distancia a todos los enemigos de ESTE evento
-                        boolean golpeado = false;
-
-                        List<ElementoJuego> elementos = gestorEvento.obtenerElementos();
-                        for (ElementoJuego elem : elementos) {
-                            if (elem instanceof Enemigo) {
-                                Enemigo en = (Enemigo) elem;
-
-                                float dx = en.getX() - paquete.x;
-                                float dy = en.getY() - paquete.y;
-                                float dist2 = dx * dx + dy * dy;
-
-                                if (dist2 <= TOLERANCIA_ENEMIGO * TOLERANCIA_ENEMIGO) {
-                                    golpeado = true;
-                                    break;
-                                }
-                            }
-                        }
-
-                        if (golpeado) {
-                            // Actualizar vidas en GameState
-                            gameState.restarVidaAJugador(paquete.playerName, 1);
-                            ultimoGolpeEnemigo.put(paquete.playerName, ahora);
-
-                            // Paquete opcional para que el cliente sepa que fue golpeado
-                            Paquete pGolpe = new Paquete("JUGADOR_HERIDO",
-                                                         paquete.playerName,
-                                                         paquete.x,
-                                                         paquete.y);
-                            // Podrías agregar info extra si querés:
-                            pGolpe.datos = "ENEMIGO";
-
-                            publisher.notifySubscribers(pGolpe);
-
-                            System.out.println("[DAÑO] " + paquete.playerName +
-                                    " fue golpeado por un enemigo en " + evento);
-                        }
-                    }
-                }
-
                 // 4) Notificar movimiento a los demás jugadores (posición actual)
                 publisher.notifySubscribers(paquete);
                 break;
