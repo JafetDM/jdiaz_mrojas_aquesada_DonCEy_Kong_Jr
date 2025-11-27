@@ -467,6 +467,32 @@ public class GameServer {
                 publisher.notifySubscribers(paquete);
                 break;
 
+            case "COLISION_MARIO":
+                //Cliente reporta colisión con Mario (MUERTE INSTANTÁNEA)
+                GameState.PlayerState jugadorMario = gameState.obtenerJugador(paquete.playerName);
+                
+                if (jugadorMario != null && jugadorMario.vida > 0) {
+                    System.out.println("[COLISION_MARIO] " + paquete.playerName + 
+                                     " golpeado por Mario -> GAME OVER INSTANTÁNEO");
+                    
+                    //MUERTE INSTANTÁNEA: Resetear vidas y puntos
+                    jugadorMario.vida = 3;
+                    jugadorMario.puntos = 0;
+                    
+                    System.out.println("[GAME OVER] " + paquete.playerName + 
+                                     " -> RESET COMPLETO (Mario letal)");
+                    
+                    // Forzar broadcast inmediato
+                    publisher.broadcastGameState();
+                    
+                    // Enviar confirmación directa al cliente
+                    Paquete gameOver = new Paquete("GAME_OVER_MARIO", "Server", 0, 0);
+                    gameOver.vida = 3;
+                    gameOver.puntos = 0;
+                    sender.sendPacket(gameOver);
+                }
+                break;
+
             case "CREAR_ENEMIGO":
                 if (paquete.enemyTipo != null) {
                     // Crear enemigo SOLO en el gestor de este evento

@@ -1,21 +1,7 @@
 // cliente.c - Adaptado para comunicarse con servidor Java usando Paquete y GameState
- 
-// Escalas para renderizado
-#define PLAYER_SCALE 0.3f   
-#define FRUIT_SCALE  0.2f   
-#define ENEMY_TARGET_SIZE_RED   40.0f
-#define ENEMY_TARGET_SIZE_BLUE  42.0f 
 
-// Radio de colisión del jugador contra enemigos (px)
-#define PLAYER_HIT_RADIUS 24.0f
-
-// Física del juego
-#define GRAVITY    900.0f   // píxeles / s^2
-#define MOVE_SPEED 220.0f   // píxeles / s
-#define JUMP_SPEED -320.0f  // píxeles / s (negativo = hacia arriba)
-
-// Índice de la plataforma objetivo para respawn
-#define PLATFORM_GOAL_INDEX 10 
+// Incluye constantes compartidas
+#include "constantes.h" 
 
 // Librerías estándar
 #include <math.h> 
@@ -73,6 +59,12 @@ typedef struct {
 } Enemy;
 
 typedef struct {
+    float x, y;
+    float collisionRadius;
+    bool active;  
+} StaticCharacter;
+
+typedef struct {
     char id[32];
     float x, y;
     int puntos;
@@ -128,8 +120,6 @@ static void procesar_movimiento_trepar(float dt);
 // Renderizado
 static void render_game(Texture2D stageTex);
 
-static bool g_showLayoutDebug = true;
-
 static GameState g_state;
 static int g_sock = -1;
 static volatile bool g_running = true;
@@ -152,6 +142,9 @@ static bool g_spectatorConnectionLost = false;
 // Nombre del jugador que se desconectó (solo informativo)
 static char g_spectatorLostName[64] = "";
 
+// Personajes estáticos (Donkey Kong y Mario)
+static StaticCharacter g_donkeyKong = {0};
+static StaticCharacter g_mario = {0};
 
 // Lanzar un nuevo proceso cliente en modo espejo para este jugador
 static void launch_spectator_instance(const char *playerName) {
@@ -183,12 +176,13 @@ static bool  g_playerInitialized = false;
 // Variables globales adicionales para trepar (declaradas temprano para uso en funciones)
 static EstadoJugador g_playerEstado = ESTADO_CAMINANDO;
 static int g_lianaActual = -1;  // -1 = no está en ninguna liana
-static float g_velocidadTrepar = 150.0f;  // píxeles por segundo
 
 
 // Texturas globales
 static Texture2D g_playerTex = {0};
 static Texture2D g_stageTex  = {0};
+static Texture2D g_texDK    = {0};
+static Texture2D g_texMario = {0};
 
 
 // Frutas
@@ -374,13 +368,22 @@ static void parse_paquete_json(const char *jsonText) {
             }
         }
     }
+    else if (strcmp(tipoStr, "GAME_OVER_MARIO") == 0) {
+        // ⚡ Mario causó Game Over instantáneo
+        printf("[RECV] GAME_OVER_MARIO - Muerte instantánea\n");
+        
+        // Cambiar al modo derrota
+        if (!g_isSpectator) {
+            g_gameMode = GAME_MODE_DERROTA;
+            printf("[GAME] Game Over por Mario - Mostrando pantalla de derrota\n");
+        }
+    }
     else if (strcmp(tipoStr, "ERROR") == 0) {
         cJSON *datos = cJSON_GetObjectItem(root, "datos");
         if (datos && cJSON_IsString(datos)) {
             printf("[ERROR SERVER] %s\n", datos->valuestring);
         }
     }
-    
     cJSON_Delete(root);
 }
 
@@ -572,10 +575,6 @@ static void parse_game_state_json(const char *jsonText) {
 
 // Detecta si el jugador está cerca de alguna liana
 static int detectar_liana_cercana(float x, float y) {
-    // Usar tolerancias un poco más generosas y considerar pies/cabeza del jugador
-    const float TOLERANCIA_X = 32.0f;  // píxeles de tolerancia horizontal
-    const float TOLERANCIA_Y_EXTRA = 32.0f; // margen vertical extra
-
     // Calcular pies y cabeza del jugador a partir de su centro 'y'
     float halfH = get_player_half_height();
     float feetY = y + halfH;
@@ -586,12 +585,12 @@ static int detectar_liana_cercana(float x, float y) {
 
         // Verificar si está cerca horizontalmente (permitir algo de margen)
         float dx = fabsf(liana->x - x);
-        if (dx > TOLERANCIA_X) continue;
+        if (dx > TOLERANCIA_X_LIANA) continue;
 
         // Verificar si cualquier parte del jugador (pies o cabeza) entra
         // dentro del rango de la liana (con margen)
-        float topCheck = liana->yTop - TOLERANCIA_Y_EXTRA;
-        float bottomCheck = liana->yBottom + TOLERANCIA_Y_EXTRA;
+        float topCheck = liana->yTop - TOLERANCIA_Y_LIANA;
+        float bottomCheck = liana->yBottom + TOLERANCIA_Y_LIANA;
 
         if ((feetY >= topCheck && feetY <= bottomCheck) ||
             (headY  >= topCheck && headY  <= bottomCheck) ||
@@ -654,7 +653,7 @@ static void procesar_movimiento_trepar(float dt) {
     
     // Movimiento vertical
     if (IsKeyDown(KEY_UP) || IsKeyDown(KEY_W)) {
-        g_playerY -= g_velocidadTrepar * dt;
+        g_playerY -= VELOCIDAD_TREPAR * dt;
         movio = true;
         
         // Limitar al tope de la liana
@@ -664,7 +663,7 @@ static void procesar_movimiento_trepar(float dt) {
     }
     
     if (IsKeyDown(KEY_DOWN) || IsKeyDown(KEY_S)) {
-        g_playerY += g_velocidadTrepar * dt;
+        g_playerY += VELOCIDAD_TREPAR * dt;
         movio = true;
         
         // Limitar al fondo de la liana
@@ -955,17 +954,32 @@ static void resolver_colision_plataformas(void) {
     }
 }
 
+// ========================
+// Detectar colisión con Mario (PELIGRO)
+// ========================
+static bool check_collision_with_mario(void) {
+    if (!g_mario.active) return false;
+    
+    float dx = g_mario.x - g_playerX;
+    float dy = g_mario.y - g_playerY;
+    float dist2 = dx * dx + dy * dy;
+    
+    float minDist = g_mario.collisionRadius + PLAYER_HIT_RADIUS;
+    
+    if (dist2 < minDist * minDist) {
+        printf("[COLISION] ¡Mario golpeó a DK Jr!\n");
+        return true;
+    }
+    
+    return false;
+}
+
 // -------------------------
 // Enviar input del teclado + física del jugador
 // -------------------------
 static void send_input_from_keys(void) {
     // Si somos espectador no enviamos inputs al servidor (solo visualizamos)
     if (g_isSpectator) {
-        // Aún permitimos toggles locales de depuración
-        if (IsKeyPressed(KEY_T)) {
-            g_showLayoutDebug = !g_showLayoutDebug;
-            printf("[DEBUG] g_showLayoutDebug = %d\n", g_showLayoutDebug);
-        }
         return;
     }
 
@@ -1027,11 +1041,6 @@ static void send_input_from_keys(void) {
             g_playerGrounded = false;
             printf("[DEBUG] Teleport a L0 -> (%.1f, %.1f)\n", g_playerX, g_playerY);
         }
-    }
-
-    if (IsKeyPressed(KEY_T)) {
-        g_showLayoutDebug = !g_showLayoutDebug;
-        printf("[DEBUG] g_showLayoutDebug = %d\n", g_showLayoutDebug);
     }
 
     // Log básico de detección de teclas (solo cuando se presionan)
@@ -1106,6 +1115,15 @@ static void send_input_from_keys(void) {
     // Respawn si cae fuera de límites (p. ej. cae al vacío)
     // Si la Y del centro del jugador supera la pantalla por bastante, respawnear
     if (g_playerY > (float)SCREEN_HEIGHT + 200.0f) {
+        respawn_player();
+    }
+
+    if (check_collision_with_mario()) {
+        printf("[MUERTE] DK Jr fue golpeado por Mario - Respawneando...\n");
+        
+        // Enviar al servidor que perdimos vida por colisión con Mario
+        send_paquete("COLISION_MARIO", "MARIO", g_playerX, g_playerY);
+        
         respawn_player();
     }
 
@@ -1212,27 +1230,6 @@ static void render_game(Texture2D stageTex) {
     int vidaLocal = -1;
     int puntosLocal = 0;
     char nombreHUD[64] = "";
-
-    // Indicador visual cuando está trepando
-    if (g_playerEstado == ESTADO_TREPANDO && g_lianaActual >= 0) {
-        const LianaDef *liana = &LIANAS[g_lianaActual];
-        DrawLine((int)liana->x, (int)liana->yTop, 
-                 (int)liana->x, (int)liana->yBottom,
-                 Fade(YELLOW, 0.8f));
-        DrawText("TREPANDO", 10, 110, 20, YELLOW);
-        DrawText(TextFormat("Liana: %d", g_lianaActual), 10, 135, 18, YELLOW);
-    }
-
-    // Estado texto
-    const char *estadoTexto = "";
-    Color estadoColor = WHITE;
-    switch (g_playerEstado) {
-        case ESTADO_CAMINANDO: estadoTexto = "CAMINANDO"; estadoColor = GREEN; break;
-        case ESTADO_TREPANDO:  estadoTexto = "TREPANDO";  estadoColor = YELLOW; break;
-        case ESTADO_CAYENDO:   estadoTexto = "CAYENDO";   estadoColor = ORANGE; break;
-        case ESTADO_SALTANDO:  estadoTexto = "SALTANDO";  estadoColor = SKYBLUE; break;
-    }
-    DrawText(TextFormat("Estado: %s", estadoTexto), 10, 160, 18, estadoColor);
     
     pthread_mutex_lock(&g_state.mutex);
     
@@ -1252,11 +1249,17 @@ static void render_game(Texture2D stageTex) {
         
         // Actualizar HUD (local u observado)
         if (strcmp(p->playerName, targetName) == 0) {
-            vidaLocal   = p->vida;
-            puntosLocal = p->puntos;
-            strncpy(nombreHUD, p->playerName, sizeof(nombreHUD) - 1);
-            nombreHUD[sizeof(nombreHUD) - 1] = '\0';
+        //LOG DE DEBUG
+        if (vidaLocal != -1 && vidaLocal != p->vida) {
+            printf("[HUD] Cambio de vida detectado: %d => %d (puntos: %d)\n", 
+                   vidaLocal, p->vida, p->puntos);
         }
+        
+        vidaLocal   = p->vida;
+        puntosLocal = p->puntos;
+        strncpy(nombreHUD, p->playerName, sizeof(nombreHUD) - 1);
+        nombreHUD[sizeof(nombreHUD) - 1] = '\0';
+    }
         
         // Jugador local
         if (strcmp(p->playerName, g_playerName) == 0 && g_playerTex.id != 0) {
@@ -1387,30 +1390,45 @@ static void render_game(Texture2D stageTex) {
         }
     }
 
-    // Layout debug (igual que antes) -----------------------
-    if (g_showLayoutDebug) {
-        for (int i = 0; i < NUM_PLATAFORMAS; i++) {
-            const PlataformaDef *p = &PLATAFORMAS[i];
-            DrawLine((int)(p->xLeft - camOffsetX), (int)(p->y - camOffsetY),
-                     (int)(p->xRight - camOffsetX), (int)(p->y - camOffsetY),
-                     Fade(RED, 0.7f));
-            float midX = (p->xLeft + p->xRight) * 0.5f;
-            DrawText(TextFormat("P%d", i),
-                     (int)midX - 10 - (int)camOffsetX,
-                     (int)p->y - 15 - (int)camOffsetY,
-                     14, RED);
-        }
-
-        for (int j = 0; j < NUM_LIANAS; j++) {
-            const LianaDef *l = &LIANAS[j];
-            DrawLine((int)(l->x - camOffsetX), (int)(l->yTop - camOffsetY),
-                     (int)(l->x - camOffsetX), (int)(l->yBottom - camOffsetY),
-                     Fade(BLUE, 0.7f));
-            DrawText(TextFormat("L%d", j),
-                     (int)(l->x - 10 - camOffsetX),
-                     (int)(l->yTop - 20 - camOffsetY),
-                     14, BLUE);
-        }
+    // Dibujar Donkey Kong y Mario
+    // --- DONKEY KONG ---
+    if (g_donkeyKong.active && g_texDK.id != 0) {
+        Rectangle src = { 0, 0, (float)g_texDK.width, (float)g_texDK.height };
+        float w = g_texDK.width * DK_SCALE;
+        float h = g_texDK.height * DK_SCALE;
+        Rectangle dst = { 
+            g_donkeyKong.x - camOffsetX, 
+            g_donkeyKong.y - camOffsetY, 
+            w, h 
+        };
+        Vector2 origin = { w / 2.0f, h / 2.0f };
+        DrawTexturePro(g_texDK, src, dst, origin, 0.0f, WHITE);
+        
+    } else if (g_donkeyKong.active) {
+        // Fallback si no hay textura
+        DrawCircle((int)(g_donkeyKong.x - camOffsetX), 
+                   (int)(g_donkeyKong.y - camOffsetY), 
+                   20, BROWN);
+    }
+    
+    // --- MARIO ---
+    if (g_mario.active && g_texMario.id != 0) {
+        Rectangle src = { 0, 0, (float)g_texMario.width, (float)g_texMario.height };
+        float w = g_texMario.width * MARIO_SCALE;
+        float h = g_texMario.height * MARIO_SCALE;
+        Rectangle dst = { 
+            g_mario.x - camOffsetX, 
+            g_mario.y - camOffsetY, 
+            w, h 
+        };
+        Vector2 origin = { w / 2.0f, h / 2.0f };
+        DrawTexturePro(g_texMario, src, dst, origin, 0.0f, WHITE);
+        
+    } else if (g_mario.active) {
+        // Fallback si no hay textura
+        DrawCircle((int)(g_mario.x - camOffsetX), 
+                   (int)(g_mario.y - camOffsetY), 
+                   18, RED);
     }
     
     pthread_mutex_unlock(&g_state.mutex);
@@ -1418,21 +1436,16 @@ static void render_game(Texture2D stageTex) {
     // ===== HUD / UI =====
     DrawText(TextFormat("Evento: %s", g_eventoAsignado), 10, 10, 20, DARKGREEN);
     DrawText(TextFormat("Jugadores: %d", g_state.totalJugadores), 10, 35, 20, DARKGREEN);
-    DrawText("Flechas: Mover | E: Enemigo | F: Fruta", 10, SCREEN_HEIGHT - 25, 15, DARKGRAY);
 
-    if (g_playerEstado == ESTADO_TREPANDO) {
-        DrawRectangle(5, SCREEN_HEIGHT - 80, 390, 50, Fade(BLACK, 0.7f));
-        DrawText("TREPANDO - Arriba/Abajo: Subir/Bajar", 10, SCREEN_HEIGHT - 75, 14, YELLOW);
-        DrawText("           Izq/Der: Cambiar liana | ESPACIO: Soltar", 
-                 10, SCREEN_HEIGHT - 55, 14, YELLOW);
-    }
 
     // ===== Detectar GAME OVER (patrón 1 vida -> reset a 3 y puntos 0) =====
     if (!g_isSpectator && g_gameMode == GAME_MODE_JUGANDO && vidaLocal >= 0) {
         if (s_lastVidaHUD != -1) {
-            if (s_lastVidaHUD == 1 && vidaLocal == 3 && puntosLocal == 0) {
+            // Patrón de reset: cualquier vida -> 3 vidas con 0 puntos
+            if (vidaLocal == 3 && puntosLocal == 0 && s_lastPuntosHUD > 0) {
                 g_gameMode = GAME_MODE_DERROTA;
-                printf("[GAME] Derrota detectada por reset de vidas (1 -> 3, puntos=0)\n");
+                printf("[GAME] Derrota detectada por reset (puntos: %d -> 0)\n", 
+                       s_lastPuntosHUD);
             }
         }
     }
@@ -1496,12 +1509,6 @@ static void render_game(Texture2D stageTex) {
         DrawText(l3, SCREEN_WIDTH / 2 - MeasureText(l3, 20) / 2, yBase + 60,  20, RAYWHITE);
     }
 
-    // Grid de depuración
-    for (int x = 0; x < SCREEN_WIDTH; x += 32)
-        DrawLine(x, 0, x, SCREEN_HEIGHT, Fade(GREEN, 0.15f));
-    for (int y = 0; y < SCREEN_HEIGHT; y += 32)
-        DrawLine(0, y, SCREEN_WIDTH, y, Fade(GREEN, 0.15f));
-
     // ---------------------------------------------------
     // PANTALLA PARA ESPECTADORES CUANDO SE PIERDE CONEXIÓN
     // (se dibuja AL FINAL, por encima de todo)
@@ -1528,6 +1535,27 @@ static void render_game(Texture2D stageTex) {
     EndDrawing();
 }
 
+// ========================
+// Inicializar DK y Mario en Plataforma 3
+// ========================
+static void init_dk_and_mario(void) {
+    const PlataformaDef *platform = &PLATAFORMAS[PLATFORM_DK_MARIO_INDEX];
+    
+    // Donkey Kong: extremo izquierdo de la plataforma
+    g_donkeyKong.x = platform->xLeft + 40.0f;  // 40px desde el borde
+    g_donkeyKong.y = platform->y - 30.0f;      // Un poco arriba de la plataforma
+    g_donkeyKong.collisionRadius = DK_COLLISION_RADIUS;
+    g_donkeyKong.active = true;
+    
+    // Mario: a la derecha de DK
+    g_mario.x = g_donkeyKong.x + 80.0f;  // 80px a la derecha de DK
+    g_mario.y = platform->y - 28.0f;     // Similar altura
+    g_mario.collisionRadius = MARIO_COLLISION_RADIUS;
+    g_mario.active = true;
+    
+    printf("[INIT] DK en (%.1f, %.1f) | Mario en (%.1f, %.1f)\n", 
+           g_donkeyKong.x, g_donkeyKong.y, g_mario.x, g_mario.y);
+}
 
 
 // -------------------------
@@ -1712,6 +1740,8 @@ int main(int argc, char *argv[]) {
         send_paquete("ROLE", "JUGADOR", 0.0f, 0.0f);
         printf("Conectado como JUGADOR\n");
     }
+
+    init_dk_and_mario();
     
     // Nota: la ventana Raylib ya fue inicializada para la selección previa.
     
@@ -1746,6 +1776,10 @@ int main(int argc, char *argv[]) {
     if (FileExists("assets/a_ab.png"))  g_texCrocBlueDown  = LoadTexture("assets/a_ab.png");
     if (FileExists("assets/a_izq.png"))  g_texCrocBlueLeft  = LoadTexture("assets/a_izq.png");
     if (FileExists("assets/a_der.png")) g_texCrocBlueRight = LoadTexture("assets/a_der.png");
+
+    // Cargar DK y Mario
+    if (FileExists("assets/dk.png"))    g_texDK    = LoadTexture("assets/dk.png");
+    if (FileExists("assets/mario.png")) g_texMario = LoadTexture("assets/mario.png");
     
     // =======================================
     // PASO 5: Loop principal
@@ -1782,6 +1816,9 @@ int main(int argc, char *argv[]) {
     if (g_texCrocBlueDown.id)  UnloadTexture(g_texCrocBlueDown);
     if (g_texCrocBlueLeft.id)  UnloadTexture(g_texCrocBlueLeft);
     if (g_texCrocBlueRight.id) UnloadTexture(g_texCrocBlueRight);
+
+    if (g_texDK.id)    UnloadTexture(g_texDK);
+    if (g_texMario.id) UnloadTexture(g_texMario);
 
     CloseWindow();
     

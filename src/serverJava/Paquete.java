@@ -21,7 +21,8 @@ public class Paquete {
     public String movimiento;     // "ARRIBA", "ABAJO", "IZQUIERDA", "DERECHA", "QUIETO"
     public float x;               // Posición X
     public float y;               // Posición Y
-    public int puntos;            // Puntos (para frutas)
+    public int puntos;  
+    public int vida;          // Vida del jugador
     public String enemyTipo;      // Tipo de enemigo (si aplica)
     public long timestamp;        // Marca de tiempo
     public Object datos;          // Campo genérico para datos adicionales
@@ -37,6 +38,7 @@ public class Paquete {
         this.playerName = playerName;
         this.x = x;
         this.y = y;
+        this.vida = 3; // Valor por defecto para la vida
         this.timestamp = System.currentTimeMillis();
     }
     

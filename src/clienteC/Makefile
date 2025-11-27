@@ -31,8 +31,8 @@ endif
 # ================================
 # Archivos fuente y salida
 # ================================
-SRC = cliente.c librerias/cJSON.c
-HEADERS = config.h librerias/cJSON.h layout.h
+SRC = cliente.c constantes.c librerias/cJSON.c
+HEADERS = config.h constantes.h librerias/cJSON.h layout.h
 BIN = cliente
 
 # ================================
