@@ -119,50 +119,26 @@ static void procesar_movimiento_trepar(float dt);
 // Renderizado
 static void render_game(Texture2D stageTex);
 
+
 static GameState g_state;
 static int g_sock = -1;
 static volatile bool g_running = true;
 static pthread_mutex_t g_send_mutex = PTHREAD_MUTEX_INITIALIZER;
 static char g_playerName[64] = "ClienteC";
 static char g_eventoAsignado[32] = "";
-// Flag para indicar si este cliente es espectador
+
+
+// Modo espectador
 static bool g_isSpectator = false;
-// Si somos espectador, nombre del jugador objetivo (ej. "Jugador1")
 static char g_spectatorTarget[64] = "";
-// Si se lanzó el cliente en modo espejo: esta instancia es un espectador que
-// debe renderizar la vista exactamente centrada en un jugador objetivo.
 static bool g_spectatorMirrorMode = false;
-
-// Ruta/executable usada para lanzar instancias espejo (copiada de argv[0])
 static char g_execPath[512] = "./cliente";
-
-// Flag para saber si, siendo espectador, perdimos conexión con el jugador que estábamos viendo
 static bool g_spectatorConnectionLost = false;
-// Nombre del jugador que se desconectó (solo informativo)
 static char g_spectatorLostName[64] = "";
 
 // Personajes estáticos (Donkey Kong y Mario)
 static StaticCharacter g_donkeyKong = {0};
 static StaticCharacter g_mario = {0};
-
-// Lanzar un nuevo proceso cliente en modo espejo para este jugador
-static void launch_spectator_instance(const char *playerName) {
-    pid_t pid = fork();
-    if (pid < 0) {
-        perror("fork");
-        return;
-    }
-    if (pid == 0) {
-        // Child: ejecutar nueva instancia
-        execlp(g_execPath, g_execPath, "--mirror", playerName, (char*)NULL);
-        // Si execlp falla
-        perror("execlp");
-        _exit(1);
-    } else {
-        // Parent: opcionalmente no esperar; imprimimos PID
-        printf("[LAUNCH] Spectator instance launched (pid=%d) for %s\n", (int)pid, playerName);
-    }
-}
 
 // Física del jugador local (lado cliente)
 static float g_playerX = 0.0f;
@@ -201,6 +177,24 @@ static Texture2D g_texCrocBlueDown  = {0};
 static Texture2D g_texCrocBlueLeft  = {0};
 static Texture2D g_texCrocBlueRight = {0};
 
+// Lanzar un nuevo proceso cliente en modo espejo para este jugador
+static void launch_spectator_instance(const char *playerName) {
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("fork");
+        return;
+    }
+    if (pid == 0) {
+        // Child: ejecutar nueva instancia
+        execlp(g_execPath, g_execPath, "--mirror", playerName, (char*)NULL);
+        // Si execlp falla
+        perror("execlp");
+        _exit(1);
+    } else {
+        // Parent: opcionalmente no esperar; imprimimos PID
+        printf("[LAUNCH] Spectator instance launched (pid=%d) for %s\n", (int)pid, playerName);
+    }
+}
 
 // ===========================
 // Funciones auxiliares para arrays dinámicos
