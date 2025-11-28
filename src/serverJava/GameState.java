@@ -138,6 +138,7 @@ public class GameState {
         public Long invulnerableHastaMs;
         public Boolean recienRespawneado;
         public Long lastDamageTime; 
+        public Long ultimaVictoriaMs;
         
         public PlayerState() {
             this.trepando = Boolean.FALSE;
@@ -146,6 +147,7 @@ public class GameState {
             this.recienRespawneado = Boolean.FALSE;
             this.invulnerableHastaMs = 0L;
             this.lastDamageTime = 0L;
+            this.ultimaVictoriaMs = 0L;
         }
     }
 
@@ -289,10 +291,10 @@ public class GameState {
                             break;
                         } else if (DEBUG_COLLISIONS.booleanValue()) {
                             // Imprimir información detallada para debug cuando no encaja
-                            System.out.println("[DEBUG-COL] " + p.playerName + " trepando - enemigo " + e.tipo +
-                                    " | p=(" + String.format("%.1f,%.1f", px, py) + ") e=(" + String.format("%.1f,%.1f", e.x, e.y) + ")" +
-                                    " | dx=" + String.format("%.1f", dx) + " dy=" + String.format("%.1f", dy) +
-                                    " | minDist=" + String.format("%.1f", minDist) + " V_TOL=" + VERTICAL_TOLERANCE_TREPAR);
+                            //System.out.println("[DEBUG-COL] " + p.playerName + " trepando - enemigo " + e.tipo +
+                                    //" | p=(" + String.format("%.1f,%.1f", px, py) + ") e=(" + String.format("%.1f,%.1f", e.x, e.y) + ")" +
+                                    //" | dx=" + String.format("%.1f", dx) + " dy=" + String.format("%.1f", dy) +
+                                    //" | minDist=" + String.format("%.1f", minDist) + " V_TOL=" + VERTICAL_TOLERANCE_TREPAR);
                         }
                     } else {
                         Float dist2 = dx * dx + dy * dy;
@@ -388,6 +390,111 @@ public class GameState {
         this.timestamp = System.currentTimeMillis();
 
         return jugadoresGameOver; 
+    }
+
+    /**
+     * Verifica si un jugador llegó a la plataforma objetivo (victoria)
+     * Incluye cooldown para evitar victorias múltiples
+     */
+    public Boolean verificarVictoria(String playerName) {
+        PlayerState p = obtenerJugador(playerName);
+        if (p == null) return Boolean.FALSE;
+        
+        //COOLDOWN DE VICTORIA: 3 segundos desde la última victoria
+        final Long COOLDOWN_VICTORIA_MS = 3000L;  
+        Long ahora = System.currentTimeMillis();  
+        
+        if (ahora - p.ultimaVictoriaMs < COOLDOWN_VICTORIA_MS) {
+            // Aún en cooldown, no puede ganar de nuevo
+            return Boolean.FALSE;
+        }
+        
+        // Plataforma 10 es la meta
+        final Integer PLATFORM_GOAL_INDEX = 10;     
+        LayoutDKJr.PlataformaDef goal = LayoutDKJr.getPlataforma(PLATFORM_GOAL_INDEX);
+        
+        // Tolerancias
+        final Float TOLERANCE_Y = 30.0f;  
+        final Float TOLERANCE_X = 20.0f;  
+        
+        // Verificar posición
+        Boolean enRangoVertical = Math.abs(p.y - goal.y) < TOLERANCE_Y;  
+        Boolean enRangoHorizontal = (p.x >= goal.xLeft - TOLERANCE_X) &&   
+                                     (p.x <= goal.xRight + TOLERANCE_X);
+        
+        if (enRangoVertical.booleanValue() && enRangoHorizontal.booleanValue()) {  
+            System.out.println("[VICTORIA] " + playerName + 
+                             " llegó a la plataforma objetivo! (" + 
+                             String.format("%.1f, %.1f", p.x, p.y) + ")");
+            return Boolean.TRUE;  
+        }
+        
+        return Boolean.FALSE;  
+    }
+    
+    /**
+     * Procesa victoria: suma vida y respawnea en plataforma inicial
+     */
+    public void procesarVictoria(String playerName) {
+        PlayerState jugador = obtenerJugador(playerName);
+        if (jugador != null) {
+            Long ahora = System.currentTimeMillis();  
+            
+            // ⚡ Actualizar timestamp de última victoria (para cooldown)
+            jugador.ultimaVictoriaMs = ahora;
+            
+            // Sumar vida por victoria
+            jugador.vida++;
+            
+            // Respawn en plataforma inicial
+            Float spawnX = LayoutDKJr.getXCentroPlataforma(0);  
+            Float spawnY = LayoutDKJr.getYForPlataforma(0) - 15.0f;  
+            
+            jugador.x = spawnX;
+            jugador.y = spawnY;
+            jugador.trepando = Boolean.FALSE;  
+            jugador.lianaActual = -1;
+            jugador.estadoMovimiento = "CAMINANDO";
+            jugador.recienRespawneado = Boolean.TRUE;  
+            jugador.invulnerableHastaMs = ahora + 2000L;  // 2 segundos de invulnerabilidad
+            
+            System.out.println("[VICTORIA] " + playerName + 
+                             " reseteado con " + jugador.vida + " vidas");
+            
+            this.timestamp = ahora;
+        }
+    }
+
+    /**
+     * Reinicia completamente un jugador (vidas, puntos, posición)
+     */
+    public void reiniciarJugadorCompleto(String playerName) {
+        PlayerState jugador = obtenerJugador(playerName);
+        if (jugador != null) {
+            Long ahora = System.currentTimeMillis();
+            
+            // Resetear stats
+            jugador.vida = 3;
+            jugador.puntos = 0;
+            
+            // Respawn en plataforma inicial
+            Float spawnX = LayoutDKJr.getXCentroPlataforma(0);
+            Float spawnY = LayoutDKJr.getYForPlataforma(0) - 15.0f;
+            
+            jugador.x = spawnX;
+            jugador.y = spawnY;
+            jugador.trepando = Boolean.FALSE;
+            jugador.lianaActual = -1;
+            jugador.estadoMovimiento = "CAMINANDO";
+            jugador.recienRespawneado = Boolean.TRUE;
+            jugador.invulnerableHastaMs = ahora + 2000L;
+            jugador.ultimaVictoriaMs = 0L;
+            
+            System.out.println("[RESET] " + playerName + 
+                             " reiniciado completamente (vida=3, puntos=0)");
+            
+            this.timestamp = ahora;
+        }
     }
 
 

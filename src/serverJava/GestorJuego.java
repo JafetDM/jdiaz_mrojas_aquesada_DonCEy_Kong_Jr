@@ -10,9 +10,12 @@ public class GestorJuego {
     private List<Subscriber> subscribers = new ArrayList<>();
     private Paquete currentState;
 
+    // Multiplicador de velocidad acumulado (para nuevos enemigos)
+    private Float multiplicadorVelocidad = 1.0f;  
+
     // ===== Fábrica =====
     public interface FabricaObjetos {
-        Enemigo crearEnemigo(String tipo, Float x, Float y);
+        Enemigo crearEnemigo(String tipo, Float x, Float y, Float multiplicadorVelocidad); 
         Fruta crearFruta(Float x, Float y, Integer puntos);
     }
 
@@ -50,19 +53,27 @@ public class GestorJuego {
         }
 
         @Override
-        public Enemigo crearEnemigo(String tipo, Float x, Float y) {
-            // Velocidades “default” que puedes ajustar
-            final Float velRojo = 60f;
-            final Float velAzul = 80f;
+        public Enemigo crearEnemigo(String tipo, Float x, Float y, Float multiplicadorVelocidad) {  
+            // Velocidades base (se multiplicarán por el multiplicador)
+            final Float velRojoBase = 60f;
+            final Float velAzulBase = 80f;
+            
+            //Aplicar multiplicador de dificultad
+            final Float velRojo = velRojoBase * multiplicadorVelocidad;
+            final Float velAzul = velAzulBase * multiplicadorVelocidad;
+            
+            System.out.println("[CREAR ENEMIGO] Velocidad ajustada: " +
+                             "Rojo=" + String.format("%.1f", velRojo) + 
+                             " Azul=" + String.format("%.1f", velAzul) +
+                             " (multiplicador: x" + String.format("%.2f", multiplicadorVelocidad) + ")");
 
-            // ======ROJO EN PLATAFORMA====
+            // ====== ROJO EN PLATAFORMA ======
             if (tipo.startsWith("CROC_RED_PLATAFORMA_")) {
-                // extraer el índice de la plataforma del string
                 String sufijo = tipo.substring("CROC_RED_PLATAFORMA_".length());
                 Integer idxP = Integer.parseInt(sufijo);
 
                 LayoutDKJr.PlataformaDef p = LayoutDKJr.getPlataforma(idxP);
-                Float xInicial = p.xLeft;  // arranca en el borde izquierdo
+                Float xInicial = p.xLeft;
 
                 return new CocodriloRojoPlataforma(
                         idxP,
@@ -70,34 +81,34 @@ public class GestorJuego {
                         p.xLeft,
                         p.xRight,
                         p.y,
-                        velRojo
+                        velRojo  
                 );
             }
 
             switch (tipo) {
                 // ====== ROJO EN LIANA ======
                 case "CROC_RED_LIANA":
-                case "CROC_RED": { // compatibilidad por si aún se usa el viejo tipo
+                case "CROC_RED": {
                     Integer idxL = findNearestLianaIndex(x);
                     LayoutDKJr.LianaDef l = LayoutDKJr.getLiana(idxL);
 
                     Float minY = l.yTop;
                     Float maxY = l.yBottom;
-                    Float yInicial = minY; // empieza arriba
+                    Float yInicial = minY;
 
-                    return new CocodriloRojoLiana(idxL, l.x, yInicial, minY, maxY, velRojo);
+                    return new CocodriloRojoLiana(idxL, l.x, yInicial, minY, maxY, velRojo);  
                 }
 
-                // ====== AZUL EN LIANA (baja y se cae) ======
+                // ====== AZUL EN LIANA ======
                 case "CROC_BLUE_LIANA":
-                case "CROC_BLUE": { // compatibilidad
+                case "CROC_BLUE": {
                     Integer idxL = findNearestLianaIndex(x);
                     LayoutDKJr.LianaDef l = LayoutDKJr.getLiana(idxL);
 
-                    Float yInicial = LayoutDKJr.getYTopLiana(idxL); // un poquito encima de la parte superior
-                    Float limiteCaida = l.yBottom + 30.0f;         // se “cae” un poco más abajo de la liana
+                    Float yInicial = LayoutDKJr.getYTopLiana(idxL);
+                    Float limiteCaida = l.yBottom + 30.0f;
 
-                    return new CocodriloAzul(idxL, l.x, yInicial, limiteCaida, velAzul);
+                    return new CocodriloAzul(idxL, l.x, yInicial, limiteCaida, velAzul);  
                 }
 
                 default:
@@ -120,7 +131,7 @@ public class GestorJuego {
     }
 
     public void crearEnemigo(String tipo, Float x, Float y) {
-        elementos.add(fabrica.crearEnemigo(tipo, x, y));
+        elementos.add(fabrica.crearEnemigo(tipo, x, y, this.multiplicadorVelocidad));  
     }
 
     //METODOS PARA FRUTAS
@@ -197,4 +208,117 @@ public class GestorJuego {
     public List<ElementoJuego> obtenerElementos() {
         return new ArrayList<>(elementos);
     }
+
+    /**
+     * Aumenta la velocidad de todos los enemigos
+     * @param multiplicador Factor de multiplicación (ej: 1.2 = 20% más rápido)
+     */
+    public void aumentarVelocidadEnemigos(Float multiplicador) {
+        Integer enemigosAfectados = 0;
+        
+        //Actualizar multiplicador acumulado
+        this.multiplicadorVelocidad *= multiplicador;
+        
+        for (ElementoJuego e : elementos) {
+            if (e instanceof Enemigo) {
+                Enemigo en = (Enemigo) e;
+                Float velocidadAnterior = en.velocidad;
+                en.velocidad *= multiplicador;
+                enemigosAfectados++;
+                
+                System.out.println("[DIFICULTAD] " + en.getTipo() + 
+                                 " velocidad: " + String.format("%.1f", velocidadAnterior) +
+                                 " -> " + String.format("%.1f", en.velocidad));
+            }
+        }
+        
+        if (enemigosAfectados > 0) {
+            System.out.println("[DIFICULTAD] " + enemigosAfectados + 
+                             " enemigos acelerados (x" + multiplicador + ")");
+            System.out.println("[DIFICULTAD] Multiplicador acumulado: x" + 
+                             String.format("%.2f", this.multiplicadorVelocidad));
+        }
+    }
+    
+    /**
+     * Obtiene la velocidad promedio de los enemigos (para debug)
+     */
+    public Float getVelocidadPromedioEnemigos() {  
+        Float sumaVelocidades = 0.0f;  
+        Integer cantidadEnemigos = 0;  
+        
+        for (ElementoJuego e : elementos) {
+            if (e instanceof Enemigo) {
+                Enemigo en = (Enemigo) e;
+                sumaVelocidades += en.velocidad;
+                cantidadEnemigos++;
+            }
+        }
+        
+        if (cantidadEnemigos == 0) return 0.0f;
+        return sumaVelocidades / cantidadEnemigos;
+    }
+
+    /**
+     * Resetea el multiplicador de velocidad al valor inicial
+     */
+    public void resetearDificultad() {
+        this.multiplicadorVelocidad = 1.0f;
+        System.out.println("[DIFICULTAD] Multiplicador reseteado a x1.0");
+    }
+    
+    /**
+     * Obtiene el multiplicador de velocidad actual
+     */
+    public Float getMultiplicadorVelocidad() {
+        return this.multiplicadorVelocidad;
+    }
+
+    /**
+     * Elimina todos los enemigos del juego
+     */
+    public void limpiarEnemigos() {
+        Integer cantidadEliminada = 0;  
+        
+        Iterator<ElementoJuego> it = elementos.iterator();
+        while (it.hasNext()) {
+            ElementoJuego e = it.next();
+            if (e instanceof Enemigo) {
+                it.remove();
+                cantidadEliminada++;
+            }
+        }
+        
+        System.out.println("[RESET] " + cantidadEliminada + " enemigos eliminados");
+    }
+    
+    /**
+     * Elimina todas las frutas del juego
+     */
+    public void limpiarFrutas() {
+        Integer cantidadEliminada = 0;  
+        
+        Iterator<ElementoJuego> it = elementos.iterator();
+        while (it.hasNext()) {
+            ElementoJuego e = it.next();
+            if (e instanceof Fruta) {
+                it.remove();
+                cantidadEliminada++;
+            }
+        }
+        
+        System.out.println("[RESET] " + cantidadEliminada + " frutas eliminadas");
+    }
+    
+    /**
+     * Resetea completamente el juego (elimina enemigos, frutas, resetea velocidad)
+     */
+    public void resetearJuegoCompleto() {
+        limpiarEnemigos();
+        limpiarFrutas();
+        resetearDificultad();
+        
+        System.out.println("[RESET] Juego reseteado completamente");
+    }
+
 }

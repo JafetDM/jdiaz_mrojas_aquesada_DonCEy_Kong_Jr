@@ -455,7 +455,37 @@ public class GameServer {
                         
                     // Verificar colisiones...
                 }
-
+                // 1) Revisar victoria
+                if (gameState.verificarVictoria(paquete.playerName).booleanValue()) {
+                    System.out.println("\n[🎉 VICTORIA] " + paquete.playerName + " salvó a Donkey Kong!");
+                    
+                    // 1) Procesar victoria (sumar vida, respawn)
+                    gameState.procesarVictoria(paquete.playerName);
+                    
+                    // 2) Aumentar velocidad de enemigos (20% más rápido)
+                    final Float MULTIPLICADOR_VELOCIDAD = 1.2f;  // ✅ WRAPPER
+                    gestorEvento.aumentarVelocidadEnemigos(MULTIPLICADOR_VELOCIDAD);
+                    
+                    // 3) Obtener datos actualizados del jugador
+                    GameState.PlayerState jugadorVictoria = gameState.obtenerJugador(paquete.playerName);
+                    
+                    // 4) Notificar victoria a todos los clientes del evento
+                    Paquete pVictoria = new Paquete("VICTORIA", paquete.playerName, 
+                                                     jugadorVictoria.x, jugadorVictoria.y);
+                    pVictoria.vida = jugadorVictoria.vida;
+                    pVictoria.puntos = jugadorVictoria.puntos;
+                    pVictoria.datos = "¡Nivel completado! Dificultad aumentada.";
+                    publisher.notifySubscribers(pVictoria);
+                    
+                    // 5) Forzar broadcast inmediato del nuevo estado
+                    publisher.broadcastGameState();
+                    
+                    System.out.println("[VICTORIA] Jugador reseteado con " + 
+                                     jugadorVictoria.vida + " vidas\n");
+                    
+                    // Salir del case sin procesar más movimiento
+                    break;
+                }
                 // 2) Revisar colisión jugador-fruta en el GestorJuego de ESTE evento
                 {
                     final Float TOLERANCIA_FRUTA = 18.0f; // píxeles, ajústalo si hace falta
@@ -525,9 +555,37 @@ public class GameServer {
                 gestorEvento.crearFruta(paquete.x, paquete.y, paquete.puntos);
                 publisher.notifySubscribers(paquete);
                 break;
+            
+            case "REINICIAR_JUEGO":
+                // REINICIO COMPLETO DEL JUEGO
+                System.out.println("\n[🔄 REINICIO] " + paquete.playerName + " reiniciando juego...");
+                
+                // 1) Limpiar enemigos y frutas
+                gestorEvento.resetearJuegoCompleto();
+                
+                // 2) Reiniciar jugador completamente
+                gameState.reiniciarJugadorCompleto(paquete.playerName);
+                
+                // 3) Obtener datos actualizados del jugador
+                GameState.PlayerState jugadorReiniciado = gameState.obtenerJugador(paquete.playerName);
+                
+                // 4) Notificar reinicio al cliente
+                Paquete pReinicio = new Paquete("JUEGO_REINICIADO", paquete.playerName, 
+                                                 jugadorReiniciado.x, jugadorReiniciado.y);
+                pReinicio.vida = jugadorReiniciado.vida;
+                pReinicio.puntos = jugadorReiniciado.puntos;
+                pReinicio.datos = "Juego reiniciado - ¡Buena suerte!";
+                publisher.notifySubscribers(pReinicio);
+                
+                // 5) Forzar broadcast inmediato del nuevo estado (sin enemigos)
+                publisher.broadcastGameState();
+                
+                System.out.println("[RESET] Juego completamente reiniciado para " + paquete.playerName);
+                System.out.println("[RESET] Multiplicador de velocidad: x1.0");
+                System.out.println("[RESET] Enemigos: 0 | Frutas: 0\n");
+                break;
 
             default:
-                // Retransmitir otros tipos de paquetes
                 publisher.notifySubscribers(paquete);
                 break;
         }

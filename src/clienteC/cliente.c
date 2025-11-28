@@ -36,7 +36,6 @@ typedef enum {
 
 typedef enum {
     GAME_MODE_JUGANDO,
-    GAME_MODE_VICTORIA,
     GAME_MODE_DERROTA
 } GameMode;
 
@@ -376,6 +375,45 @@ static void parse_paquete_json(const char *jsonText) {
         if (!g_isSpectator) {
             g_gameMode = GAME_MODE_DERROTA;
             printf("[GAME] Mostrando pantalla de derrota\n");
+        }
+    }
+    else if (strcmp(tipoStr, "VICTORIA") == 0) {
+        //VICTORIA - Nivel completado
+        printf("[RECV] VICTORIA - ¡Nivel completado!\n");
+        
+        if (!g_isSpectator) {
+            // Parsear nueva posición y vidas
+            cJSON *x = cJSON_GetObjectItem(root, "x");
+            cJSON *y = cJSON_GetObjectItem(root, "y");
+            cJSON *vida = cJSON_GetObjectItem(root, "vida");
+            cJSON *puntos = cJSON_GetObjectItem(root, "puntos");
+            
+            // FORZAR SINCRONIZACIÓN DE POSICIÓN
+            if (x && y) {
+                float newX = (float)x->valuedouble;
+                float newY = (float)y->valuedouble;
+                
+                printf("[VICTORIA] Respawneando en P0: (%.1f, %.1f)\n", newX, newY);
+                
+                // Actualizar posición local del jugador
+                g_playerX = newX;
+                g_playerY = newY;
+                g_playerVy = 0.0f;
+                g_playerGrounded = true;
+                g_playerEstado = ESTADO_CAMINANDO;
+                g_lianaActual = -1;
+                g_playerInitialized = true;
+            }
+            
+            // Actualizar HUD
+            if (vida) {
+                printf("[VICTORIA] Nuevas vidas: %d\n", vida->valueint);
+            }
+            if (puntos) {
+                printf("[VICTORIA] Puntos: %d\n", puntos->valueint);
+            }
+            
+            printf("[GAME] ¡Nivel completado! Dificultad aumentada\n");
         }
     }
     else if (strcmp(tipoStr, "ERROR") == 0) {
@@ -983,21 +1021,28 @@ static void send_input_from_keys(void) {
         return;
     }
 
-    // Si estamos en pantalla de victoria/derrota, solo procesamos teclas del menú
-    if (g_gameMode == GAME_MODE_VICTORIA) {
-        // Seguir jugando (volver al juego)
-        if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE)) {
-            g_gameMode = GAME_MODE_JUGANDO;
-        }
-        // Salir del juego
-        if (IsKeyPressed(KEY_Q) || IsKeyPressed(KEY_ESCAPE)) {
-            g_running = false;
-        }
-        return;
-    } else if (g_gameMode == GAME_MODE_DERROTA) {
-        // Y = seguir jugando (ya tenés la lógica de respawn en el servidor/cliente)
+    // Si estamos en pantalla de derrota, solo procesamos teclas del menú
+    if (g_gameMode == GAME_MODE_DERROTA) {
+        // Y = reiniciar juego desde cero
         if (IsKeyPressed(KEY_Y)) {
+            printf("[INPUT] Reiniciando juego desde cero...\n");
+            
+            // Enviar paquete al servidor para reiniciar
+            send_paquete("REINICIAR_JUEGO", "REINICIO", 0.0f, 0.0f);
+            
+            // Resetear estado local del jugador
+            g_playerX = 0.0f;
+            g_playerY = 0.0f;
+            g_playerVy = 0.0f;
+            g_playerGrounded = false;
+            g_playerEstado = ESTADO_CAMINANDO;
+            g_lianaActual = -1;
+            g_playerInitialized = false;  // Forzar reinicialización
+            
+            // Volver al modo jugando
             g_gameMode = GAME_MODE_JUGANDO;
+            
+            printf("[GAME] Juego reiniciado - esperando respuesta del servidor\n");
         }
         // N o ESC = salir
         if (IsKeyPressed(KEY_N) || IsKeyPressed(KEY_ESCAPE)) {
@@ -1125,22 +1170,6 @@ static void send_input_from_keys(void) {
         send_paquete("COLISION_MARIO", "MARIO", g_playerX, g_playerY);
         
         respawn_player();
-    }
-
-    // ===== Comprobar condición de victoria: llegar a la plataforma P10 =====
-    if (!g_isSpectator && g_gameMode == GAME_MODE_JUGANDO) {
-        const int goalIndex = PLATFORM_GOAL_INDEX; // P10
-        const PlataformaDef *goal = &PLATAFORMAS[goalIndex];
-
-        float halfH = get_player_half_height();
-        float feetY = g_playerY + halfH;
-        const float tolY = 6.0f; // similar a la tolerancia de colisión con plataformas
-
-        if (g_playerX >= goal->xLeft && g_playerX <= goal->xRight &&
-            fabsf(feetY - goal->y) <= tolY) {
-            g_gameMode = GAME_MODE_VICTORIA;
-            printf("[GAME] Victoria: jugador alcanzó la plataforma P10\n");
-        }
     }
 
     // Enviar al servidor solo si cambió
@@ -1272,11 +1301,15 @@ static void render_game(Texture2D stageTex) {
             float distTotal = sqrtf(dx*dx + dy*dy);
             bool estoyTrepandoLocal = (g_playerEstado == ESTADO_TREPANDO);
 
-            if (!estoyTrepandoLocal && 
-                (!g_playerInitialized || distTotal > 80.0f)) {
+            
+            bool deberiaResincronizar = !estoyTrepandoLocal && 
+                                        (!g_playerInitialized || 
+                                         distTotal > 80.0f || 
+                                         fabsf(dy) > 100.0f);  
 
-                printf("[SYNC] Corrigiendo posición local desde el servidor: (%.1f, %.1f) (dist=%.1f)\n",
-                       serverX, serverY, distTotal);
+            if (deberiaResincronizar) {
+                printf("[SYNC] Corrigiendo posición local desde el servidor: (%.1f, %.1f) (dist=%.1f, dy=%.1f)\n",
+                       serverX, serverY, distTotal, dy);
 
                 g_playerX = serverX;
                 g_playerY = serverY;
@@ -1472,26 +1505,8 @@ static void render_game(Texture2D stageTex) {
         DrawText(TextFormat("Puntos: %d", puntosLocal), 10, 85, 20, GOLD);
     }
 
-    // ===== Pantallas de victoria / derrota =====
-    if (g_gameMode == GAME_MODE_VICTORIA) {
-        DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, Fade(BLACK, 0.7f));
-        const char *titulo = "¡HAS RESCATADO A DONKEY KONG!";
-        int fontSize = 28;
-        int textW = MeasureText(titulo, fontSize);
-        DrawText(titulo, (SCREEN_WIDTH - textW) / 2, SCREEN_HEIGHT / 3, fontSize, GREEN);
-
-        int yBase = SCREEN_HEIGHT / 3 + 60;
-        const char *linea1 = "ENTER o ESPACIO: seguir jugando";
-        const char *linea2 = "Q o ESC: salir del juego";
-
-        DrawText(linea1,
-                 SCREEN_WIDTH / 2 - MeasureText(linea1, 20) / 2,
-                 yBase, 20, RAYWHITE);
-        DrawText(linea2,
-                 SCREEN_WIDTH / 2 - MeasureText(linea2, 20) / 2,
-                 yBase + 30, 20, RAYWHITE);
-
-    } else if (g_gameMode == GAME_MODE_DERROTA) {
+    // ===== Pantallas de derrota =====
+    if (g_gameMode == GAME_MODE_DERROTA) {
         DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, Fade(BLACK, 0.7f));
 
         const char *titulo = "GAME OVER";
