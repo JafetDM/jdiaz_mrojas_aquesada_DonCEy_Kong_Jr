@@ -140,6 +140,25 @@ static char g_spectatorLostName[64] = "";
 static StaticCharacter g_donkeyKong = {0};
 static StaticCharacter g_mario = {0};
 
+// Lanzar un nuevo proceso cliente en modo espejo para este jugador
+static void launch_spectator_instance(const char *playerName) {
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("fork");
+        return;
+    }
+    if (pid == 0) {
+        // Child: ejecutar nueva instancia
+        execlp(g_execPath, g_execPath, "--mirror", playerName, (char*)NULL);
+        // Si execlp falla
+        perror("execlp");
+        _exit(1);
+    } else {
+        // Parent: opcionalmente no esperar; imprimimos PID
+        printf("[LAUNCH] Spectator instance launched (pid=%d) for %s\n", (int)pid, playerName);
+    }
+}
+
 // Física del jugador local (lado cliente)
 static float g_playerX = 0.0f;
 static float g_playerY = 0.0f;
@@ -176,25 +195,6 @@ static Texture2D g_texCrocBlueUp    = {0};
 static Texture2D g_texCrocBlueDown  = {0};
 static Texture2D g_texCrocBlueLeft  = {0};
 static Texture2D g_texCrocBlueRight = {0};
-
-// Lanzar un nuevo proceso cliente en modo espejo para este jugador
-static void launch_spectator_instance(const char *playerName) {
-    pid_t pid = fork();
-    if (pid < 0) {
-        perror("fork");
-        return;
-    }
-    if (pid == 0) {
-        // Child: ejecutar nueva instancia
-        execlp(g_execPath, g_execPath, "--mirror", playerName, (char*)NULL);
-        // Si execlp falla
-        perror("execlp");
-        _exit(1);
-    } else {
-        // Parent: opcionalmente no esperar; imprimimos PID
-        printf("[LAUNCH] Spectator instance launched (pid=%d) for %s\n", (int)pid, playerName);
-    }
-}
 
 // ===========================
 // Funciones auxiliares para arrays dinámicos
@@ -1296,10 +1296,10 @@ static void render_game(Texture2D stageTex) {
             bool estoyTrepandoLocal = (g_playerEstado == ESTADO_TREPANDO);
 
             
-            bool deberiaResincronizar = !estoyTrepandoLocal && 
-                                        (!g_playerInitialized || 
-                                         distTotal > 80.0f || 
-                                         fabsf(dy) > 100.0f);  
+            bool deberiaResincronizar =
+                                        (!g_playerInitialized ||
+                                        distTotal > 80.0f ||
+                                        fabsf(dy) > 100.0f); 
 
             if (deberiaResincronizar) {
                 printf("[SYNC] Corrigiendo posición local desde el servidor: (%.1f, %.1f) (dist=%.1f, dy=%.1f)\n",
