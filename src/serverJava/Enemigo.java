@@ -4,16 +4,16 @@ package serverJava;
 
 public abstract class Enemigo implements ElementoJuego {
 
-    protected static int SIGUIENTE_ID = 1;
+    protected static Integer SIGUIENTE_ID = 1;
 
-    protected final int id;
-    protected float x;
-    protected float y;
-    protected float velocidad;
-    protected boolean vivo = true;
+    protected final Integer id;
+    protected Float x;
+    protected Float y;
+    protected Float velocidad;
+    protected Boolean vivo = Boolean.TRUE;
     protected String direccion = "DOWN";
 
-    public Enemigo(float x, float y, float velocidad) {
+    public Enemigo(Float x, Float y, Float velocidad) {
         this.id = SIGUIENTE_ID++;
         this.x = x;
         this.y = y;
@@ -21,22 +21,22 @@ public abstract class Enemigo implements ElementoJuego {
     }
 
     @Override
-    public int getId() { return id; }
+    public Integer getId() { return id; }
 
     @Override
-    public float getX() { return x; }
+    public Float getX() { return x; }
 
     @Override
-    public float getY() { return y; }
+    public Float getY() { return y; }
 
-    public boolean estaVivo() { return vivo; }
+    public Boolean estaVivo() { return vivo; }
 
     public String getDireccion() {
         return direccion;
     }
 
     @Override
-    public abstract void actualizar(float dt);
+    public abstract void actualizar(Float dt);
 
     @Override
     public abstract String getTipo();
@@ -48,17 +48,17 @@ public abstract class Enemigo implements ElementoJuego {
 // =====================================================
 class CocodriloRojoLiana extends Enemigo {
 
-    private final int lianaIndex;
-    private final float minY;
-    private final float maxY;
-    private boolean bajando = true;
+    private final Integer lianaIndex;
+    private final Float minY;
+    private final Float maxY;
+    private Boolean bajando = Boolean.TRUE;
 
-    public CocodriloRojoLiana(int lianaIndex,
-                              float x,
-                              float yInicial,
-                              float minY,
-                              float maxY,
-                              float velocidad) {
+    public CocodriloRojoLiana(Integer lianaIndex,
+                              Float x,
+                              Float yInicial,
+                              Float minY,
+                              Float maxY,
+                              Float velocidad) {
         super(x, yInicial, velocidad);
         this.lianaIndex = lianaIndex;
         this.minY = minY;
@@ -66,14 +66,14 @@ class CocodriloRojoLiana extends Enemigo {
     }
 
     @Override
-    public void actualizar(float dt) {
-        if (bajando) {
+    public void actualizar(Float dt) {
+        if (bajando.booleanValue()) {
             y += velocidad * dt;
             direccion = "DOWN";
 
             if (y >= maxY) {
                 y = maxY;
-                bajando = false;
+                bajando = Boolean.FALSE;
             }
         } else {
             y -= velocidad * dt;
@@ -81,7 +81,7 @@ class CocodriloRojoLiana extends Enemigo {
 
             if (y <= minY) {
                 y = minY;
-                bajando = true;
+                bajando = Boolean.TRUE;
             }
         }
     }
@@ -98,17 +98,17 @@ class CocodriloRojoLiana extends Enemigo {
 // =====================================================
 class CocodriloRojoPlataforma extends Enemigo {
 
-    private final int plataformaIndex;
-    private final float minX;
-    private final float maxX;
-    private boolean moviendoDerecha = true;
+    private final Integer plataformaIndex;
+    private final Float minX;
+    private final Float maxX;
+    private Boolean moviendoDerecha = Boolean.TRUE;
 
-    public CocodriloRojoPlataforma(int plataformaIndex,
-                                   float xInicial,
-                                   float minX,
-                                   float maxX,
-                                   float y,
-                                   float velocidad) {
+    public CocodriloRojoPlataforma(Integer plataformaIndex,
+                                   Float xInicial,
+                                   Float minX,
+                                   Float maxX,
+                                   Float y,
+                                   Float velocidad) {
         super(xInicial, y, velocidad);
         this.plataformaIndex = plataformaIndex;
         this.minX = minX;
@@ -116,14 +116,14 @@ class CocodriloRojoPlataforma extends Enemigo {
     }
 
     @Override
-    public void actualizar(float dt) {
-        if (moviendoDerecha) {
+    public void actualizar(Float dt) {
+        if (moviendoDerecha.booleanValue()) {
             x += velocidad * dt;
             direccion = "RIGHT";
 
             if (x >= maxX) {
                 x = maxX;
-                moviendoDerecha = false;
+                moviendoDerecha = Boolean.FALSE;
             }
         } else {
             x -= velocidad * dt;
@@ -131,7 +131,7 @@ class CocodriloRojoPlataforma extends Enemigo {
 
             if (x <= minX) {
                 x = minX;
-                moviendoDerecha = true;
+                moviendoDerecha = Boolean.TRUE;
             }
         }
     }
@@ -148,26 +148,26 @@ class CocodriloRojoPlataforma extends Enemigo {
 // =====================================================
 class CocodriloAzul extends Enemigo {
 
-    private final int lianaIndex;
-    private final float limiteY;
+    private final Integer lianaIndex;
+    private final Float limiteY;
 
-    public CocodriloAzul(int lianaIndex,
-                         float x,
-                         float yInicial,
-                         float limiteY,
-                         float velocidad) {
+    public CocodriloAzul(Integer lianaIndex,
+                         Float x,
+                         Float yInicial,
+                         Float limiteY,
+                         Float velocidad) {
         super(x, yInicial, velocidad);
         this.lianaIndex = lianaIndex;
         this.limiteY = limiteY;
     }
 
     @Override
-    public void actualizar(float dt) {
+    public void actualizar(Float dt) {
         y += velocidad * dt;
         direccion = "DOWN";
         
         if (y >= limiteY) {
-            vivo = false; // el GestorJuego lo elimina
+            vivo = Boolean.FALSE; // el GestorJuego lo elimina
         }
     }
 

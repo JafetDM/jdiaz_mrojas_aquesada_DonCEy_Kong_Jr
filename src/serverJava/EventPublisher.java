@@ -106,7 +106,7 @@ public class EventPublisher implements Publisher {
      * Hace broadcast del estado completo del juego
      */
     public void broadcastGameState() {
-        Paquete estadoPaquete = new Paquete("ESTADO_JUEGO", "Server", 0, 0);
+        Paquete estadoPaquete = new Paquete("ESTADO_JUEGO", "Server", 0f, 0f);
         estadoPaquete.datos = gameState.toJson();
         notifySubscribers(estadoPaquete);
     }
@@ -114,7 +114,7 @@ public class EventPublisher implements Publisher {
     /**
      * Agrega un jugador al estado
      */
-    public void agregarJugador(String playerName, float x, float y) {
+    public void agregarJugador(String playerName, Float x, Float y) {
         gameState.actualizarJugador(playerName, x, y);
     }
     
@@ -135,7 +135,7 @@ public class EventPublisher implements Publisher {
         return gameState;
     }
     
-    public int getCantidadSuscriptores() {
+    public Integer getCantidadSuscriptores() {
         return subscribers.size();
     }
     

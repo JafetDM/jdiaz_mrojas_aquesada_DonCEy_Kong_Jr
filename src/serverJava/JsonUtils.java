@@ -135,15 +135,15 @@ public class JsonUtils {
     /**
      * Valida si un String es JSON válido
      */
-    public static boolean isValidJson(String json) {
+    public static Boolean isValidJson(String json) {
         if (json == null || json.trim().isEmpty()) {
-            return false;
+            return Boolean.FALSE;
         }
         try {
             gson.fromJson(json, Object.class);
-            return true;
+            return Boolean.TRUE;
         } catch (Exception e) {
-            return false;
+            return Boolean.FALSE;
         }
     }
     

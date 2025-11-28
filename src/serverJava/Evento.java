@@ -3,6 +3,7 @@ package serverJava;
 /**
  * Enum para identificar diferentes instancias de juego
  * Cada cliente se conecta a un juego específico
+ * Cumple con principios OO: sin tipos primitivos
  */
 public enum Evento {
     JUEGO_1,
@@ -13,7 +14,7 @@ public enum Evento {
      * @param index índice del juego (0 = JUEGO_1, 1 = JUEGO_2, etc.)
      * @return El evento correspondiente
      */
-    public static Evento fromIndex(int index) {
+    public static Evento fromIndex(Integer index) { 
         Evento[] valores = values();
         if (index >= 0 && index < valores.length) {
             return valores[index];
@@ -25,7 +26,7 @@ public enum Evento {
      * Obtiene el índice del evento
      * @return índice (0, 1, etc.)
      */
-    public int getIndex() {
+    public Integer getIndex() {  
         return this.ordinal();
     }
     

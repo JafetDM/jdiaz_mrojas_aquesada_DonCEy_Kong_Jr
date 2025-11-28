@@ -19,12 +19,12 @@ public class Paquete {
     public String tipo;           // "MOVIMIENTO", "CREAR_ENEMIGO", "CREAR_FRUTA", "ESTADO_JUEGO", etc.
     public String playerName;     // Nombre del jugador que envía
     public String movimiento;     // "ARRIBA", "ABAJO", "IZQUIERDA", "DERECHA", "QUIETO"
-    public float x;               // Posición X
-    public float y;               // Posición Y
-    public int puntos;  
-    public int vida;          // Vida del jugador
+    public Float x;               // Posición X
+    public Float y;               // Posición Y
+    public Integer puntos;  
+    public Integer vida;          // Vida del jugador
     public String enemyTipo;      // Tipo de enemigo (si aplica)
-    public long timestamp;        // Marca de tiempo
+    public Long timestamp;        // Marca de tiempo
     public Object datos;          // Campo genérico para datos adicionales
     
     // Constructor vacío (necesario para Gson)
@@ -33,7 +33,7 @@ public class Paquete {
     }
     
     // Constructor con parámetros comunes
-    public Paquete(String tipo, String playerName, float x, float y) {
+    public Paquete(String tipo, String playerName, Float x, Float y) {
         this.tipo = tipo;
         this.playerName = playerName;
         this.x = x;
@@ -43,7 +43,7 @@ public class Paquete {
     }
     
     // Constructor para movimiento
-    public Paquete(String tipo, String playerName, String movimiento, float x, float y) {
+    public Paquete(String tipo, String playerName, String movimiento, Float x, Float y) {
         this(tipo, playerName, x, y);
         this.movimiento = movimiento;
     }
@@ -90,7 +90,7 @@ public class Paquete {
      * Valida que el paquete tenga los datos mínimos necesarios
      * @return true si es válido
      */
-    public boolean isValid() {
+    public Boolean isValid() {
         return tipo != null && !tipo.isEmpty();
     }
     
@@ -108,17 +108,17 @@ public class Paquete {
     
     // Métodos estáticos de utilidad para crear paquetes comunes
     
-    public static Paquete crearMovimiento(String playerName, String movimiento, float x, float y) {
+    public static Paquete crearMovimiento(String playerName, String movimiento, Float x, Float y) {
         return new Paquete("MOVIMIENTO", playerName, movimiento, x, y);
     }
     
-    public static Paquete crearEnemigo(String playerName, String enemyTipo, float x, float y) {
+    public static Paquete crearEnemigo(String playerName, String enemyTipo, Float x, Float y) {
         Paquete p = new Paquete("CREAR_ENEMIGO", playerName, x, y);
         p.enemyTipo = enemyTipo;
         return p;
     }
     
-    public static Paquete crearFruta(String playerName, float x, float y, int puntos) {
+    public static Paquete crearFruta(String playerName, Float x, Float y, Integer puntos) {
         Paquete p = new Paquete("CREAR_FRUTA", playerName, x, y);
         p.puntos = puntos;
         return p;

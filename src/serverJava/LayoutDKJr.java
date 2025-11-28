@@ -12,11 +12,11 @@ public class LayoutDKJr {
 
     // ----- Lianas: misma X, pero con Y de inicio y fin -----
     public static class LianaDef {
-        public final float x;
-        public final float yTop;
-        public final float yBottom;
+        public final Float x;
+        public final Float yTop;
+        public final Float yBottom;
 
-        public LianaDef(float x, float yTop, float yBottom) {
+        public LianaDef(Float x, Float yTop, Float yBottom) {
             this.x = x;
             this.yTop = yTop;
             this.yBottom = yBottom;
@@ -30,11 +30,11 @@ public class LayoutDKJr {
 
     // ----- Plataformas: misma Y, pero con X de inicio y fin -----
     public static class PlataformaDef {
-        public final float xLeft;
-        public final float xRight;
-        public final float y;
+        public final Float xLeft;
+        public final Float xRight;
+        public final Float y;
 
-        public PlataformaDef(float xLeft, float xRight, float y) {
+        public PlataformaDef(Float xLeft, Float xRight, Float y) {
             this.xLeft = xLeft;
             this.xRight = xRight;
             this.y = y;
@@ -48,8 +48,8 @@ public class LayoutDKJr {
 
     // ===== Deben coincidir con layout.h del cliente =====
 
-    public static final int NUM_LIANAS = 14;
-    public static final int NUM_PLATAFORMAS = 11;
+    public static final Integer NUM_LIANAS = 14;
+    public static final Integer NUM_PLATAFORMAS = 11;
 
     public static final LianaDef[] LIANAS = {
         new LianaDef( 22.0f, 192.0f, 522.0f ),  // L0
@@ -84,14 +84,14 @@ public class LayoutDKJr {
 
     // ===== Helpers básicos =====
 
-    public static LianaDef getLiana(int index) {
+    public static LianaDef getLiana(Integer index) {
         if (index < 0 || index >= LIANAS.length) {
             throw new IllegalArgumentException("Liana inválida: " + index);
         }
         return LIANAS[index];
     }
 
-    public static PlataformaDef getPlataforma(int index) {
+    public static PlataformaDef getPlataforma(Integer index) {
         if (index < 0 || index >= PLATAFORMAS.length) {
             throw new IllegalArgumentException("Plataforma inválida: " + index);
         }
@@ -99,12 +99,12 @@ public class LayoutDKJr {
     }
 
     /** X de la liana (compatibilidad con versión anterior). */
-    public static float getXForLiana(int lianaIndex) {
+    public static Float getXForLiana(Integer lianaIndex) {
         return getLiana(lianaIndex).x;
     }
 
     /** Y de la plataforma (compatibilidad con versión anterior). */
-    public static float getYForPlataforma(int plataformaIndex) {
+    public static Float getYForPlataforma(Integer plataformaIndex) {
         return getPlataforma(plataformaIndex).y;
     }
 
@@ -112,7 +112,7 @@ public class LayoutDKJr {
      * Y inicial para un cocodrilo azul que baja por la liana:
      * un poquito por encima del tope de esa liana.
      */
-    public static float getYTopLiana(int lianaIndex) {
+    public static Float getYTopLiana(Integer lianaIndex) {
         LianaDef l = getLiana(lianaIndex);
         return l.yTop - 20.0f;   // ajusta el offset si querés
     }
@@ -120,7 +120,7 @@ public class LayoutDKJr {
     /**
      * X del centro de una plataforma (para poner cocodrilos rojos en plataforma).
      */
-    public static float getXCentroPlataforma(int plataformaIndex) {
+    public static Float getXCentroPlataforma(Integer plataformaIndex) {
         PlataformaDef p = getPlataforma(plataformaIndex);
         return (p.xLeft + p.xRight) * 0.5f;
     }
@@ -129,7 +129,7 @@ public class LayoutDKJr {
      * Y sobre una liana, según "altura" discreta:
      * 0 = arriba, 1 = medio, 2 = abajo (para frutas).
      */
-    public static float getYOnLiana(int lianaIndex, int alturaIndex) {
+    public static Float getYOnLiana(Integer lianaIndex, Integer alturaIndex) {
         LianaDef l = getLiana(lianaIndex);
         switch (alturaIndex) {
             case 0: // arriba
@@ -153,11 +153,11 @@ public class LayoutDKJr {
         return List.of(PLATAFORMAS);
     }
 
-    public static int getCantidadLianas() {
+    public static Integer getCantidadLianas() {
         return LIANAS.length;
     }
 
-    public static int getCantidadPlataformas() {
+    public static Integer getCantidadPlataformas() {
         return PLATAFORMAS.length;
     }
 }

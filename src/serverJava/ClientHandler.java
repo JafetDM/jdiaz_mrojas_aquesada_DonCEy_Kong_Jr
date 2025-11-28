@@ -16,12 +16,12 @@ public class ClientHandler implements Runnable, Subscriber {
     private final GameServer server;
     private DataInputStream in;
     private DataOutputStream out;
-    private volatile boolean running = true;
+    private volatile Boolean running = Boolean.TRUE; 
     
     public ClientHandler(Socket socket, String playerName, Evento evento, GameServer server) {
         this.socket = socket;
         this.playerName = playerName;
-        this.evento = evento;  // NUEVO
+        this.evento = evento;  
         this.server = server;
         
         try {
@@ -70,7 +70,7 @@ public class ClientHandler implements Runnable, Subscriber {
         System.out.println("[*] Thread iniciado para " + playerName);
         
         try {
-            while (running) {
+            while (running.booleanValue()) {
                 // Leer JSON del cliente
                 String jsonInput = in.readUTF();
                 
@@ -92,7 +92,7 @@ public class ClientHandler implements Runnable, Subscriber {
                     paquete.playerName = playerName;
                 }
                 
-                System.out.println("[<-] " + playerName + " enviĂł: " + paquete);
+                //System.out.println("[<-] " + playerName + " enviĂł: " + paquete);
                 
                 // Procesar el paquete en el servidor
                 server.processPlayerInput(this, paquete);
@@ -102,7 +102,7 @@ public class ClientHandler implements Runnable, Subscriber {
             System.out.println("[!] " + playerName + " cerró la conexión");
             
         } catch (IOException e) {
-            if (running) {
+            if (running.booleanValue()) { 
                 System.err.println("[ERROR] IOException en " + playerName + ": " + e.getMessage());
             }
             
@@ -135,7 +135,7 @@ public class ClientHandler implements Runnable, Subscriber {
      * @param json El JSON a enviar
      */
     public synchronized void sendJson(String json) {
-        if (!running || out == null) {
+        if (!running.booleanValue() || out == null) {  
             return;
         }
         
@@ -146,7 +146,7 @@ public class ClientHandler implements Runnable, Subscriber {
         }
         
         // Opcional: validar que sea JSON válido
-        if (!JsonUtils.isValidJson(json)) {
+        if (!JsonUtils.isValidJson(json).booleanValue()) {
             System.err.println("[ERROR] Intento de enviar JSON inválido a " + playerName);
             System.err.println("JSON: " + json);
             return;
@@ -160,7 +160,7 @@ public class ClientHandler implements Runnable, Subscriber {
             
         } catch (IOException e) {
             System.err.println("[ERROR] No se pudo enviar a " + playerName + ": " + e.getMessage());
-            running = false;
+            running = Boolean.FALSE;
         }
     }
     
@@ -170,7 +170,7 @@ public class ClientHandler implements Runnable, Subscriber {
      * Detiene el handler y limpia recursos
      */
     public void stop() {
-        running = false;
+        running = Boolean.FALSE;
         cleanup();
     }
     
@@ -178,7 +178,7 @@ public class ClientHandler implements Runnable, Subscriber {
      * Limpia recursos y cierra conexiones
      */
     private void cleanup() {
-        running = false;
+        running = Boolean.FALSE;
         
         // Remover del servidor (esto también cancela la suscripción)
         server.removeClient(this);

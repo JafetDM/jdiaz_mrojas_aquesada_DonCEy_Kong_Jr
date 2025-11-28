@@ -22,13 +22,13 @@ public class GameState {
     private List<FruitState> frutas;
     
     // Timestamp de última actualización
-    private long timestamp;
+    private Long timestamp;
 
     // Map para controlar el cooldown de daño por jugador
     private Map<String, Long> ultimoDaño;
 
     // Cooldown en ms entre daños (enemigo/caída)
-    private static final long HIT_COOLDOWN_MS = 1000; // 1 segundo
+    private static final Long HIT_COOLDOWN_MS = 1000L; // 1 segundo
     
     /**
      * Constructor
@@ -45,7 +45,7 @@ public class GameState {
     /**
      * Actualiza la posición de un jugador
      */
-    public void actualizarJugador(String playerName, float x, float y) {
+    public void actualizarJugador(String playerName, Float x, Float y) {
         PlayerState p = jugadores.get(playerName);
         if (p == null) {
             p = new PlayerState();
@@ -64,7 +64,7 @@ public class GameState {
     /**
      * Suma puntos al jugador indicado, si existe.
      */
-    public void sumarPuntosAJugador(String playerName, int puntos) {
+    public void sumarPuntosAJugador(String playerName, Integer puntos) {
         if (puntos <= 0) return;
 
         PlayerState p = jugadores.get(playerName);
@@ -75,15 +75,31 @@ public class GameState {
     }
 
     /**
-     * Resta vidas al jugador indicado, si existe.
+     * Resta vidas a un jugador
+     * @return true si el jugador llegó a 0 vidas (Game Over)
      */
-    public void restarVidaAJugador(String playerName, int cantidad) {
-        if (cantidad <= 0) return;
+    public Boolean restarVidaAJugador(String playerName, Integer cantidad) {
+        PlayerState jugador = obtenerJugador(playerName);
+        if (jugador != null) {
+            jugador.vida -= cantidad;
+            if (jugador.vida <= 0) {
+                jugador.vida = 0;
+                return Boolean.TRUE; // GAME OVER
+            }
+            jugador.lastDamageTime = System.currentTimeMillis();
+        }
+        return Boolean.FALSE;
+    }
 
-        PlayerState p = jugadores.get(playerName);
-        if (p != null) {
-            p.vida = Math.max(0, p.vida - cantidad);
-            this.timestamp = System.currentTimeMillis();
+    /**
+     * Resetea un jugador tras Game Over (vidas y puntos a inicial)
+     */
+    public void resetearJugador(String playerName) {
+        PlayerState jugador = obtenerJugador(playerName);
+        if (jugador != null) {
+            jugador.vida = 3;
+            jugador.puntos = 0;
+            System.out.println("[GAME OVER] " + playerName + " reseteado");
         }
     }
     
@@ -112,41 +128,43 @@ public class GameState {
     // Clase interna para el estado de un jugador
     public static class PlayerState {
         public String playerName;
-        public float x;
-        public float y;
-        public int vida;
-        public int puntos;
-        public boolean trepando;      // está trepando?
-        public int lianaActual;       // índice de liana (-1 si no está en ninguna)
+        public Float x;
+        public Float y;
+        public Integer vida;
+        public Integer puntos;
+        public Boolean trepando;      // está trepando?
+        public Integer lianaActual;       // índice de liana (-1 si no está en ninguna)
         public String estadoMovimiento; // "CAMINANDO", "TREPANDO", "CAYENDO", "SALTANDO"
-        public long invulnerableHastaMs;
-        public boolean recienRespawneado;
+        public Long invulnerableHastaMs;
+        public Boolean recienRespawneado;
+        public Long lastDamageTime; 
         
         public PlayerState() {
-            this.trepando = false;
+            this.trepando = Boolean.FALSE;
             this.lianaActual = -1;
             this.estadoMovimiento = "CAMINANDO";
-            this.recienRespawneado = false;
+            this.recienRespawneado = Boolean.FALSE;
             this.invulnerableHastaMs = 0L;
+            this.lastDamageTime = 0L;
         }
     }
 
     // Clases internas para enemigos y frutas
     public static class EnemyState {
-        public int id;
+        public Integer id;
         public String tipo;
-        public float x;
-        public float y;
-        public float velocidad;
+        public Float x;
+        public Float y;
+        public Float velocidad;
         public String direccion;
     }
 
     public static class FruitState {
-        public int id;
-        public float x;
-        public float y;
-        public int puntos;
-        public boolean recolectada;
+        public Integer id;
+        public Float x;
+        public Float y;
+        public Integer puntos;
+        public Boolean recolectada;
         public String tipo;
     }
     
@@ -179,7 +197,7 @@ public class GameState {
                 fs.x = fr.getX();
                 fs.y = fr.getY();
                 fs.puntos = fr.getPuntos();
-                fs.recolectada = false; // por ahora siempre false
+                fs.recolectada = Boolean.FALSE; // por ahora siempre false
                 fs.tipo = fr.getTipoFruta();
 
                 frutas.add(fs);
@@ -189,75 +207,79 @@ public class GameState {
         this.timestamp = System.currentTimeMillis();
     }
 
-    public void procesarColisionesYRespawns(GestorJuego gestor) {
-        if (jugadores.isEmpty()) return;
+    /**
+     * Procesa colisiones y respawns
+     * @return Lista de jugadores que llegaron a 0 vidas (Game Over)
+     */
+    public List<String> procesarColisionesYRespawns(GestorJuego gestor) {
+        List<String> jugadoresGameOver = new ArrayList<>(); 
+        
+        if (jugadores.isEmpty()) return jugadoresGameOver;  
 
         // Spawn en la plataforma 0
-        float spawnX = LayoutDKJr.getXCentroPlataforma(0);
-        float spawnY = LayoutDKJr.getYForPlataforma(0) - 15.0f;
+        Float spawnX = LayoutDKJr.getXCentroPlataforma(0);
+        Float spawnY = LayoutDKJr.getYForPlataforma(0) - 15.0f;
 
         // RADIOS AJUSTADOS SEGÚN ESTADO DEL JUGADOR
-        final float PLAYER_RADIUS_NORMAL = 14.0f;
-        final float PLAYER_RADIUS_TREPAR = 24.0f;  // MÁS GRANDE cuando trepa
-        final float ENEMY_RADIUS  = 16.0f;
-        final float FRUIT_RADIUS  = 18.0f;
+        final Float PLAYER_RADIUS_NORMAL = 14.0f;
+        final Float PLAYER_RADIUS_TREPAR = 24.0f;  // MÁS GRANDE cuando trepa
+        final Float ENEMY_RADIUS  = 16.0f;
+        final Float FRUIT_RADIUS  = 18.0f;
 
         // Límite de caída
-        float fallLimitY = 700.0f;
-
-        long now = System.currentTimeMillis();
+        Float fallLimitY = 700.0f;
+        Long now = System.currentTimeMillis();
 
         List<FruitState> frutasAEliminar = new ArrayList<>();
 
-    // DEBUG flag temporal para imprimir info detallada de colisiones
-    final boolean DEBUG_COLLISIONS = true;
+        // DEBUG flag temporal para imprimir info detallada de colisiones
+        final Boolean DEBUG_COLLISIONS = true;
 
-    for (PlayerState p : jugadores.values()) {
-            float px = p.x;
-            float py = p.y;
-
+        for (PlayerState p : jugadores.values()) {
+            Float px = p.x;
+            Float py = p.y;
             // AJUSTAR RADIO DE COLISIÓN SEGÚN SI ESTÁ TREPANDO
-            float playerRadius = p.trepando ? PLAYER_RADIUS_TREPAR : PLAYER_RADIUS_NORMAL;
+            Float playerRadius = p.trepando.booleanValue() ? PLAYER_RADIUS_TREPAR : PLAYER_RADIUS_NORMAL;
 
-            if (p.recienRespawneado) {
-                float margenSeguro = 30.0f; // píxeles por encima del límite de caída
+            if (p.recienRespawneado.booleanValue()) {
+                Float margenSeguro = 30.0f; // píxeles por encima del límite de caída
                 // Si ya está en zona segura (bien por encima del límite), le quitamos la protección
                 if (py < (fallLimitY - margenSeguro)) {
-                    p.recienRespawneado = false;
+                    p.recienRespawneado = Boolean.FALSE;
                 } else {
                     // Sigue con coordenadas "raras" (por paquetes viejos de caída),
                     // saltamos toda la lógica de daño en este frame
                     continue;
                 }
             }
+            
             // Cooldown de daño
             Long lastHit = ultimoDaño.get(p.playerName);
-            long elapsed = (lastHit == null) ? Long.MAX_VALUE : (now - lastHit);
-            boolean invulnerable = (now < p.invulnerableHastaMs);
-            boolean puedeRecibirDaño = !invulnerable && (elapsed > HIT_COOLDOWN_MS);
+            Long elapsed = (lastHit == null) ? Long.MAX_VALUE : (now - lastHit);
+            Boolean invulnerable = (now < p.invulnerableHastaMs);
+            Boolean puedeRecibirDaño = !invulnerable.booleanValue() && (elapsed > HIT_COOLDOWN_MS);
 
-            //  DETECTAR CAÍDA AL VACÍO
-            boolean caida = (py > fallLimitY);
-            boolean chocaEnemigo = false;
+            // DETECTAR CAÍDA AL VACÍO
+            Boolean caida = (py > fallLimitY);
+            Boolean chocaEnemigo = Boolean.FALSE;
 
-            //  DETECTAR COLISIÓN CON ENEMIGOS
-            if (puedeRecibirDaño && !caida) {
+            // DETECTAR COLISIÓN CON ENEMIGOS
+            if (puedeRecibirDaño.booleanValue() && !caida.booleanValue()) {
                 for (EnemyState e : enemigos) {
-                    float dx = e.x - px;
-                    float dy = e.y - py;
+                    Float dx = e.x - px;
+                    Float dy = e.y - py;
 
                     // USAR RADIO AJUSTADO
-                    float minDist = ENEMY_RADIUS + playerRadius;
-
-                    if (p.trepando) {
+                    Float minDist = ENEMY_RADIUS + playerRadius;
+                    if (p.trepando.booleanValue()) {
                         // Cuando el jugador está trepando, la distancia vertical puede ser
                         // mayor (está sobre la liana). Para que los enemigos puedan golpear
                         // en la liana, comprobamos separación horizontal y una tolerancia
                         // vertical específica en lugar de la distancia euclidiana completa.
-                        final float VERTICAL_TOLERANCE_TREPAR = 40.0f; // px
-                        boolean hitTrepar = (Math.abs(dx) <= minDist && Math.abs(dy) <= VERTICAL_TOLERANCE_TREPAR);
-                        if (hitTrepar) {
-                            chocaEnemigo = true;
+                        final Float VERTICAL_TOLERANCE_TREPAR = 40.0f; // px
+                        Boolean hitTrepar = (Math.abs(dx) <= minDist && Math.abs(dy) <= VERTICAL_TOLERANCE_TREPAR);
+                        if (hitTrepar.booleanValue()) {
+                            chocaEnemigo = Boolean.TRUE;
                             String estado = "TREPANDO";
                             System.out.println("[COLISION] " + p.playerName + 
                                     " [" + estado + "] golpeado por " + e.tipo + 
@@ -265,7 +287,7 @@ public class GameState {
                                     " dy=" + String.format("%.1f", Math.abs(dy)) +
                                     " | pos=(" + String.format("%.1f,%.1f", px, py) + ")");
                             break;
-                        } else if (DEBUG_COLLISIONS) {
+                        } else if (DEBUG_COLLISIONS.booleanValue()) {
                             // Imprimir información detallada para debug cuando no encaja
                             System.out.println("[DEBUG-COL] " + p.playerName + " trepando - enemigo " + e.tipo +
                                     " | p=(" + String.format("%.1f,%.1f", px, py) + ") e=(" + String.format("%.1f,%.1f", e.x, e.y) + ")" +
@@ -273,14 +295,14 @@ public class GameState {
                                     " | minDist=" + String.format("%.1f", minDist) + " V_TOL=" + VERTICAL_TOLERANCE_TREPAR);
                         }
                     } else {
-                        float dist2 = dx * dx + dy * dy;
+                        Float dist2 = dx * dx + dy * dy;
                         if (dist2 < minDist * minDist) {
-                            chocaEnemigo = true;
+                            chocaEnemigo = Boolean.TRUE;
                             String estado = "NORMAL";
                             System.out.println("[COLISION] " + p.playerName + 
                                     " [" + estado + "] golpeado por " + e.tipo + 
                                     " | dist=" + String.format("%.1f", Math.sqrt(dist2)) +
-                                    " | pos=(" + String.format("%.1f,%.1f", px, py) + ")");
+                                    " | pos=(" + String.format("%.1f,%.1f", px, py) + ")"); 
                             break;
                         }
                     }
@@ -289,32 +311,31 @@ public class GameState {
 
             // --- Colisión con frutas ---
             for (FruitState f : frutas) {
-                if (f.recolectada) continue;
+                if (f.recolectada.booleanValue()) continue;
 
-                float dx = f.x - px;
-                float dy = f.y - py;
-                float dist2 = dx * dx + dy * dy;
-
+                Float dx = f.x - px;
+                Float dy = f.y - py;
+                Float dist2 = dx * dx + dy * dy;
                 if (dist2 < FRUIT_RADIUS * FRUIT_RADIUS) {
                     p.puntos += f.puntos;
-                    f.recolectada = true;
+                    f.recolectada = Boolean.TRUE;
                     frutasAEliminar.add(f);
                     System.out.println("[FRUTA] " + p.playerName + 
                                     " recolectó " + f.tipo + " (+" + f.puntos + " pts)");
                 }
             }
 
-            //  APLICAR DAÑO SI CORRESPONDE
-            if (puedeRecibirDaño && (caida || chocaEnemigo)) {
+            // APLICAR DAÑO SI CORRESPONDE
+            if (puedeRecibirDaño.booleanValue() && (caida.booleanValue() || chocaEnemigo.booleanValue())) {
 
                 // Log del evento
-                if (caida) {
+                if (caida.booleanValue()) {
                     System.out.println("[CAÍDA] " + p.playerName + 
                                     " cayó al vacío (y=" + String.format("%.1f", py) + ")");
                 }
 
                 // 1) Restar vida
-                int vidasAntes = p.vida;
+                Integer vidasAntes = p.vida;
                 if (p.vida > 0) {
                     p.vida--;
                 }
@@ -323,6 +344,8 @@ public class GameState {
 
                 // 2) Si llegó a 0 vidas: GAME OVER
                 if (p.vida <= 0) {
+                    jugadoresGameOver.add(p.playerName);  
+                    
                     p.vida = 3;
                     p.puntos = 0;
                     p.invulnerableHastaMs = now + 2000L;
@@ -330,17 +353,17 @@ public class GameState {
                                     " -> vidas=3, puntos=0 (RESET COMPLETO)");
                 }
 
-                // 3)RESPAWN FORZOSO
-                float oldX = p.x;
-                float oldY = p.y;
+                // 3) RESPAWN FORZOSO
+                Float oldX = p.x;
+                Float oldY = p.y;
                 
                 p.x = spawnX;
                 p.y = spawnY;
 
-                p.recienRespawneado = true;
+                p.recienRespawneado = Boolean.TRUE;
                 
                 // 4) Resetear estado de movimiento
-                p.trepando = false;
+                p.trepando = Boolean.FALSE;
                 p.lianaActual = -1;
                 p.estadoMovimiento = "CAMINANDO";
 
@@ -363,6 +386,8 @@ public class GameState {
 
         // ACTUALIZAR TIMESTAMP SIEMPRE
         this.timestamp = System.currentTimeMillis();
+
+        return jugadoresGameOver; 
     }
 
 
@@ -385,14 +410,14 @@ public class GameState {
     /**
      * Detecta si el jugador está cerca de una liana y puede trepar
      */
-    private int detectarLianaCercana(float x, float y) {
-        final float TOLERANCIA_X = 15.0f; // píxeles de tolerancia horizontal
+    private Integer detectarLianaCercana(Float x, Float y) {
+        final Float TOLERANCIA_X = 15.0f; // píxeles de tolerancia horizontal
         
-        for (int i = 0; i < LayoutDKJr.getCantidadLianas(); i++) {
+        for (Integer i = 0; i < LayoutDKJr.getCantidadLianas(); i++) {
             LayoutDKJr.LianaDef liana = LayoutDKJr.getLiana(i);
             
             // Verificar si está cerca horizontalmente
-            float dx = Math.abs(liana.x - x);
+            Float dx = Math.abs(liana.x - x);
             if (dx <= TOLERANCIA_X) {
                 // Verificar si está dentro del rango vertical de la liana
                 if (y >= liana.yTop - 20.0f && y <= liana.yBottom + 20.0f) {
@@ -406,16 +431,16 @@ public class GameState {
     /**
      * Actualiza el estado de trepar del jugador
      */
-    public void actualizarEstadoTrepar(String playerName, boolean intentaTrepar) {
+    public void actualizarEstadoTrepar(String playerName, Boolean intentaTrepar) {
         PlayerState p = jugadores.get(playerName);
         if (p == null) return;
         
-        if (intentaTrepar) {
+        if (intentaTrepar.booleanValue()) {
             // Detectar si está cerca de una liana
-            int lianaIndex = detectarLianaCercana(p.x, p.y);
+            Integer lianaIndex = detectarLianaCercana(p.x, p.y);
             
             if (lianaIndex >= 0) {
-                p.trepando = true;
+                p.trepando = Boolean.TRUE;
                 p.lianaActual = lianaIndex;
                 p.estadoMovimiento = "TREPANDO";
                 
@@ -425,7 +450,7 @@ public class GameState {
             }
         } else {
             // Soltar la liana
-            p.trepando = false;
+            p.trepando = Boolean.FALSE;
             p.lianaActual = -1;
             p.estadoMovimiento = "CAMINANDO";
         }
@@ -437,16 +462,16 @@ public class GameState {
      * Variante que recibe la Y propuesta por el cliente para sincronizar la posición
      * al iniciar el trepar. El servidor la clampa dentro del rango de la liana.
      */
-    public void actualizarEstadoTrepar(String playerName, boolean intentaTrepar, float x, float y) {
+    public void actualizarEstadoTrepar(String playerName, Boolean intentaTrepar, Float x, Float y) {
         PlayerState p = jugadores.get(playerName);
         if (p == null) return;
 
-        if (intentaTrepar) {
+        if (intentaTrepar.booleanValue()) {
             // Detectar liana cercana usando la X/Y propuestas por el cliente
-            int lianaIndex = detectarLianaCercana(x, y);
+            Integer lianaIndex = detectarLianaCercana(x, y);
 
             if (lianaIndex >= 0) {
-                p.trepando = true;
+                p.trepando = Boolean.TRUE;
                 p.lianaActual = lianaIndex;
                 p.estadoMovimiento = "TREPANDO";
 
@@ -460,7 +485,7 @@ public class GameState {
                 else p.y = y;
             }
         } else {
-            p.trepando = false;
+            p.trepando = Boolean.FALSE;
             p.lianaActual = -1;
             p.estadoMovimiento = "CAMINANDO";
             // Actualizar la Y del jugador al valor proporcionado por el cliente
@@ -473,10 +498,9 @@ public class GameState {
     /**
      * Procesa movimiento vertical cuando está trepando
      */
-    public void moverEnLiana(String playerName, float deltaY) {
+    public void moverEnLiana(String playerName, Float deltaY) {
         PlayerState p = jugadores.get(playerName);
-        if (p == null || !p.trepando || p.lianaActual < 0) return;
-        
+        if (p == null || !p.trepando.booleanValue()) return;
         LayoutDKJr.LianaDef liana = LayoutDKJr.getLiana(p.lianaActual);
         
         // Mover en Y
@@ -506,11 +530,11 @@ public class GameState {
         this.evento = evento;
     }
     
-    public long getTimestamp() {
+    public Long getTimestamp() {
         return timestamp;
     }
     
-    public int getCantidadJugadores() {
+    public Integer getCantidadJugadores() {
         return jugadores.size();
     }
 

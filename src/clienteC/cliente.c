@@ -368,14 +368,14 @@ static void parse_paquete_json(const char *jsonText) {
             }
         }
     }
-    else if (strcmp(tipoStr, "GAME_OVER_MARIO") == 0) {
-        // ⚡ Mario causó Game Over instantáneo
-        printf("[RECV] GAME_OVER_MARIO - Muerte instantánea\n");
+    else if (strcmp(tipoStr, "GAME_OVER_MARIO") == 0 || strcmp(tipoStr, "GAME_OVER") == 0) {
+        // Game Over (por cualquier causa)
+        printf("[RECV] GAME_OVER - Sin vidas\n");
         
         // Cambiar al modo derrota
         if (!g_isSpectator) {
             g_gameMode = GAME_MODE_DERROTA;
-            printf("[GAME] Game Over por Mario - Mostrando pantalla de derrota\n");
+            printf("[GAME] Mostrando pantalla de derrota\n");
         }
     }
     else if (strcmp(tipoStr, "ERROR") == 0) {

@@ -11,7 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Maneja las conexiones de clientes y coordina los publishers de cada evento
  */
 public class GameServer {
-    private final int port;
+    private final Integer port;
 
     private static final String MAP_IMAGE_PATH = "src/serverJava/assets/mapa.png";
     
@@ -19,8 +19,8 @@ public class GameServer {
     private final List<ClientHandler> clients = new CopyOnWriteArrayList<>();
 
     // ================== HELPERS DE CLIENTES / EVENTOS ==================
-    private int contarClientesPorEvento(Evento evento) {
-        int count = 0;
+    private Integer contarClientesPorEvento(Evento evento) {
+        Integer count = 0;
         for (ClientHandler c : clients) {
             if (c.getEvento() == evento) {
                 count++;
@@ -29,11 +29,11 @@ public class GameServer {
         return count;
     }
 
-    private boolean tieneClientesEnEvento(Evento evento) {
+    private Boolean tieneClientesEnEvento(Evento evento) {
         return contarClientesPorEvento(evento) > 0;
     }
 
-    private int getTotalClientes() {
+    private Integer getTotalClientes() {
         return clients.size();
     }
     
@@ -48,7 +48,7 @@ public class GameServer {
     // Mapa de espectador -> jugador objetivo (playerName)
     private final Map<String, String> spectatorTarget = new ConcurrentHashMap<>();
     
-    public GameServer(int port) {
+    public GameServer(Integer port) {
         this.port = port;
 
         // Crear un Publisher y un GestorJuego para cada Evento
@@ -124,9 +124,9 @@ public class GameServer {
         startAdminConsole();
         
         try (ServerSocket serverSocket = new ServerSocket(port)) {
-            int playerCount = 0;
+            Integer playerCount = 0;
             
-            while (true) {
+            while (Boolean.TRUE) {
                 // Aceptar cliente
                 Socket clientSocket = serverSocket.accept();
 
@@ -139,7 +139,7 @@ public class GameServer {
                         try (DataOutputStream tempOut = new DataOutputStream(
                                 new BufferedOutputStream(clientSocket.getOutputStream()))) {
 
-                            Paquete pError = new Paquete("ERROR", "Server", 0, 0);
+                            Paquete pError = new Paquete("ERROR", "Server", 0f, 0f);
                             pError.datos = "Servidor lleno: máximo 6 conexiones (2 jugadores + 4 espectadores).";
                             String jsonError = pError.toJson();
 
@@ -178,7 +178,7 @@ public class GameServer {
                 new Thread(handler).start();
 
                 // LUEGO enviar mensaje de bienvenida
-                Paquete bienvenida = new Paquete("BIENVENIDA", "Server", 0, 0);
+                Paquete bienvenida = new Paquete("BIENVENIDA", "Server", 0f, 0f);
                 bienvenida.datos = "Bienvenido " + playerName + " al " + evento;
                 handler.update(bienvenida);
 
@@ -197,10 +197,10 @@ public class GameServer {
      */
     private void startGameLoop() {
         Thread gameThread = new Thread(() -> {
-            final float dt = 1.0f / 60.0f;
-            long lastBroadcast = System.currentTimeMillis();
+            final Float dt = 1.0f / 60.0f;
+            Long lastBroadcast = System.currentTimeMillis();
             
-            while (true) {
+            while (Boolean.TRUE) {
                 try {
                     // Actualizar todos los gestores de todos los eventos
                     for (GestorJuego g : gestores.values()) {
@@ -208,7 +208,7 @@ public class GameServer {
                     }
                     
                     // Broadcast del estado cada 100ms (10 veces por segundo)
-                    long now = System.currentTimeMillis();
+                    Long now = System.currentTimeMillis();
                     if (now - lastBroadcast >= 100) {
                         broadcastGameStates();
                         lastBroadcast = now;
@@ -222,7 +222,7 @@ public class GameServer {
                 }
             }
         });
-        gameThread.setDaemon(true);
+        gameThread.setDaemon(Boolean.TRUE);
         gameThread.start();
         System.out.println("[*] Game loop iniciado a 60 FPS");
     }
@@ -251,7 +251,28 @@ public class GameServer {
             gameState.actualizarEnemigosYFrutas(elementos);
 
             // 2) Aplicar lógica de colisiones + respawn + vidas/puntos
-            gameState.procesarColisionesYRespawns(gestorEvento);
+            List<String> jugadoresGameOver = gameState.procesarColisionesYRespawns(gestorEvento);
+
+            //ENVIAR PAQUETE GAME_OVER A CADA JUGADOR QUE PERDIÓ
+            if (jugadoresGameOver != null && !jugadoresGameOver.isEmpty()) {
+                for (String playerName : jugadoresGameOver) {
+                    // Buscar el ClientHandler de este jugador
+                    for (ClientHandler client : clients) {
+                        if (client.getPlayerName().equals(playerName) && 
+                            client.getEvento() == evento) {
+                            
+                            // Enviar paquete GAME_OVER
+                            Paquete gameOver = new Paquete("GAME_OVER", "Server", 0f, 0f);
+                            gameOver.vida = 3;
+                            gameOver.puntos = 0;
+                            client.sendPacket(gameOver);
+                            
+                            System.out.println("[SERVER] GAME_OVER enviado a " + playerName);
+                            break;
+                        }
+                    }
+                }
+            }
 
             // 3) Enviar ESTADO_JUEGO a los suscriptores de este evento
             publisher.broadcastGameState();
@@ -270,9 +291,9 @@ public class GameServer {
         }
 
         // Solo log de tipos importantes (no MOVIMIENTO)
-        if (!paquete.tipo.equals("MOVIMIENTO")) {
-            System.out.println("[INPUT] " + paquete);
-        }
+        //if (!paquete.tipo.equals("MOVIMIENTO")) { 
+        //    System.out.println("[INPUT] " + paquete);
+        //}
 
         // Obtener el evento del cliente
         Evento evento = sender.getEvento();
@@ -309,36 +330,36 @@ public class GameServer {
                         GameState gs = publisher.getGameState();
                         if (gs != null) {
                             // Mapear índice fijo 1->Jugador1, 2->Jugador2
-                            int requestedIndex = (int) Math.round(paquete.x);
+                            Integer requestedIndex = (Integer)(int) Math.round(paquete.x);
                             String targetPlayer = null;
                             if (requestedIndex == 1 || requestedIndex == 2) {
                                 targetPlayer = "Jugador" + requestedIndex;
                             }
 
                             // Verificar si el target existe en el GameState
-                            boolean targetExists = (targetPlayer != null && gs.obtenerJugador(targetPlayer) != null);
-                            if (!targetExists) {
+                            Boolean targetExists = (targetPlayer != null && gs.obtenerJugador(targetPlayer) != null);
+                            if (!targetExists.booleanValue()) {
                                 // Si no existe aún, registrar espectador sin objetivo
                                 spectatorTarget.put(paquete.playerName, null);
                                 System.out.println("[ROLE] " + paquete.playerName + " registrado como espectador (objetivo no disponible: " + targetPlayer + ")");
-                                Paquete ok = new Paquete("BIENVENIDA", "Server", 0, 0);
+                                Paquete ok = new Paquete("BIENVENIDA", "Server", 0f, 0f);
                                 ok.datos = "Conectado como ESPECTADOR (objetivo no disponible yet)";
                                 sender.sendPacket(ok);
                             } else {
                                 // Contar cuantos espectadores ya miran a ese jugador
-                                int count = 0;
+                                Integer count = 0;
                                 for (String v : spectatorTarget.values()) {
                                     if (targetPlayer.equals(v)) count++;
                                 }
 
                                 if (count >= 2) {
-                                    Paquete err = new Paquete("ERROR", "Server", 0, 0);
+                                    Paquete err = new Paquete("ERROR", "Server", 0f, 0f);
                                     err.datos = "Máximo de espectadores para ese jugador alcanzado";
                                     sender.sendPacket(err);
                                     System.out.println("[ROLE] Rechazado espectador " + paquete.playerName + " para objetivo " + targetPlayer);
                                 } else {
                                     spectatorTarget.put(paquete.playerName, targetPlayer);
-                                    Paquete ok = new Paquete("BIENVENIDA", "Server", 0, 0);
+                                    Paquete ok = new Paquete("BIENVENIDA", "Server", 0f, 0f);
                                     ok.datos = "Conectado como ESPECTADOR mirando a " + targetPlayer;
                                     sender.sendPacket(ok);
                                     System.out.println("[ROLE] " + paquete.playerName + " es espectador de " + targetPlayer);
@@ -352,10 +373,10 @@ public class GameServer {
                     if (publisher != null) {
                         GameState gs = publisher.getGameState();
                         if (gs != null) {
-                            int playersCount = gs.obtenerJugadores().size();
+                            Integer playersCount = gs.obtenerJugadores().size();
                             if (playersCount >= 2) {
                                 // Rechazar como jugador: convertir a espectador por defecto
-                                Paquete err = new Paquete("ERROR", "Server", 0, 0);
+                                Paquete err = new Paquete("ERROR", "Server", 0f, 0f);
                                 err.datos = "Máximo de jugadores alcanzado. Se le asignó rol de espectador.";
                                 sender.sendPacket(err);
 
@@ -367,11 +388,11 @@ public class GameServer {
                             } else {
                                 // Aceptar como jugador: registrar en GameState y enviar spawn
                                 LayoutDKJr.PlataformaDef p0 = LayoutDKJr.getPlataforma(0);
-                                float spawnX = LayoutDKJr.getXCentroPlataforma(0);
-                                float spawnY = p0.y - 20.0f;
+                                Float spawnX = LayoutDKJr.getXCentroPlataforma(0);
+                                Float spawnY = p0.y - 20.0f;
                                 gs.actualizarJugador(paquete.playerName, spawnX, spawnY);
 
-                                Paquete ok = new Paquete("BIENVENIDA", "Server", 0, 0);
+                                Paquete ok = new Paquete("BIENVENIDA", "Server", 0f, 0f);
                                 ok.datos = "Conectado como JUGADOR";
                                 sender.sendPacket(ok);
 
@@ -386,7 +407,7 @@ public class GameServer {
             case "TREPAR":
                 // El cliente indica que quiere trepar
                 // Pasamos la X/Y enviada por el cliente para sincronizar posición en la liana
-                gameState.actualizarEstadoTrepar(paquete.playerName, true, paquete.x, paquete.y);
+                gameState.actualizarEstadoTrepar(paquete.playerName, Boolean.TRUE, paquete.x, paquete.y);
                 // Enviar inmediatamente un paquete MOVIMIENTO con la posición autoritativa
                 GameState.PlayerState jugadorTrepar = gameState.obtenerJugador(paquete.playerName);
                 if (jugadorTrepar != null) {
@@ -400,7 +421,7 @@ public class GameServer {
             case "SOLTAR_LIANA":
                 // El cliente suelta la liana -> pasar la X/Y del cliente para sincronizar
                 // Usamos la variante que recibe (playerName, intentaTrepar, x, y)
-                gameState.actualizarEstadoTrepar(paquete.playerName, false, paquete.x, paquete.y);
+                gameState.actualizarEstadoTrepar(paquete.playerName, Boolean.FALSE, paquete.x, paquete.y);
                 // Además, notificar inmediatamente un paquete MOVIMIENTO con la nueva posición
                 GameState.PlayerState jugadorSoltado = gameState.obtenerJugador(paquete.playerName);
                 if (jugadorSoltado != null) {
@@ -425,7 +446,7 @@ public class GameServer {
                 // Modificar el caso existente para considerar si está trepando
                 GameState.PlayerState jugador = gameState.obtenerJugador(paquete.playerName);
                     
-                if (jugador != null && jugador.trepando) {
+                if (jugador != null && jugador.trepando.booleanValue()) {
                     // Si está trepando, solo permitir movimiento vertical
                     gameState.moverEnLiana(paquete.playerName, paquete.y - jugador.y);
                 } else {
@@ -437,9 +458,9 @@ public class GameServer {
 
                 // 2) Revisar colisión jugador-fruta en el GestorJuego de ESTE evento
                 {
-                    final float TOLERANCIA_FRUTA = 18.0f; // píxeles, ajústalo si hace falta
+                    final Float TOLERANCIA_FRUTA = 18.0f; // píxeles, ajústalo si hace falta
 
-                    int puntosGanados = gestorEvento.recolectarFruta(
+                    Integer puntosGanados = gestorEvento.recolectarFruta(
                             paquete.x,
                             paquete.y,
                             TOLERANCIA_FRUTA
@@ -457,9 +478,7 @@ public class GameServer {
                         pCol.puntos = puntosGanados;
                         publisher.notifySubscribers(pCol);
 
-                        System.out.println("[COLISION] " + paquete.playerName +
-                                " recolectó fruta en " + evento +
-                                " (+" + puntosGanados + " pts)");
+                        //System.out.println("[COLISION] " + paquete.playerName +" recolectó fruta en " + evento +" (+" + puntosGanados + " pts)");
                     }
                 }
 
@@ -486,7 +505,7 @@ public class GameServer {
                     publisher.broadcastGameState();
                     
                     // Enviar confirmación directa al cliente
-                    Paquete gameOver = new Paquete("GAME_OVER_MARIO", "Server", 0, 0);
+                    Paquete gameOver = new Paquete("GAME_OVER_MARIO", "Server", 0f, 0f);
                     gameOver.vida = 3;
                     gameOver.puntos = 0;
                     sender.sendPacket(gameOver);
@@ -551,7 +570,7 @@ public class GameServer {
         System.out.println("[-] " + client.getPlayerName() + " desconectado de " + evento);
         
         // Notificar a otros jugadores del mismo evento
-        Paquete desconexion = new Paquete("DESCONEXION", client.getPlayerName(), 0, 0);
+        Paquete desconexion = new Paquete("DESCONEXION", client.getPlayerName(), 0f, 0f);
         notifyByEvento(evento, desconexion);
     }
     
@@ -582,8 +601,8 @@ public class GameServer {
     // =============== MÉTODOS DEL ADMIN ===============
 
     // Lee un entero con mensaje y validación básica
-    private int leerEntero(Scanner sc, String prompt) {
-        while (true) {
+    private Integer leerEntero(Scanner sc, String prompt) {
+        while (Boolean.TRUE) {
             System.out.print(prompt + ": ");
             String linea = sc.nextLine().trim();
             try {
@@ -592,25 +611,27 @@ public class GameServer {
                 System.out.println("  [ADMIN] Valor inválido, ingrese un número.");
             }
         }
+        return null; // nunca llega aquí
     }
 
     // Lee un entero entre [min, max] inclusive
-    private int leerEnteroEnRango(Scanner sc, String prompt, int min, int max) {
-        while (true) {
-            int valor = leerEntero(sc, prompt + " (" + min + " - " + max + ")");
+    private Integer leerEnteroEnRango(Scanner sc, String prompt, Integer min, Integer max) {
+        while (Boolean.TRUE) {
+            Integer valor = leerEntero(sc, prompt + " (" + min + " - " + max + ")");
             if (valor < min || valor > max) {
                 System.out.println("  [ADMIN] Fuera de rango, intente de nuevo.");
             } else {
                 return valor;
             }
         }
+        return null; // nunca llega aquí
     }
 
     // Helper para leer el evento (Juego 1 / Juego 2) con validación
     private Evento leerEvento(java.util.Scanner sc) {
         System.out.print("  Evento (1 = JUEGO_1, 2 = JUEGO_2): ");
         String lineaEv = sc.nextLine().trim();
-        int idxEv;
+        Integer idxEv;
         try {
             idxEv = Integer.parseInt(lineaEv) - 1;
         } catch (NumberFormatException e) {
@@ -634,7 +655,7 @@ public class GameServer {
         Evento evento = leerEvento(sc);
         if (evento == null) return;
         // Validar que el evento tenga al menos un cliente activo
-        if (!tieneClientesEnEvento(evento)) {
+        if (!tieneClientesEnEvento(evento).booleanValue()) {
             System.out.println("  [ADMIN] No hay clientes activos en " + evento +
                             ". No se crearán enemigos en este juego.");
             return;
@@ -647,7 +668,7 @@ public class GameServer {
         System.out.print("  Opción: ");
 
         String lineaTipo = sc.nextLine().trim();
-        int opTipo;
+        Integer opTipo;
         try {
             opTipo = Integer.parseInt(lineaTipo);
         } catch (NumberFormatException e) {
@@ -671,7 +692,7 @@ public class GameServer {
             System.out.print("  Liana (0.." + (LayoutDKJr.getCantidadLianas() - 1) + "): ");
             String lineaL = sc.nextLine().trim();
 
-            int liana;
+            Integer liana;
             try {
                 liana = Integer.parseInt(lineaL);
             } catch (NumberFormatException e) {
@@ -684,7 +705,7 @@ public class GameServer {
                 return;
             }
 
-            int plataforma = -1; // no aplica
+            Integer plataforma = -1; // no aplica
             crearEnemigoComoAdmin(evento, tipo, liana, plataforma);
             return;
         }
@@ -696,7 +717,7 @@ public class GameServer {
         System.out.print("  Opción: ");
 
         String lineaDest = sc.nextLine().trim();
-        int opDest;
+        Integer opDest;
         try {
             opDest = Integer.parseInt(lineaDest);
         } catch (NumberFormatException e) {
@@ -709,7 +730,7 @@ public class GameServer {
             System.out.print("  Liana (0.." + (LayoutDKJr.getCantidadLianas() - 1) + "): ");
             String lineaL = sc.nextLine().trim();
 
-            int liana;
+            Integer liana;
             try {
                 liana = Integer.parseInt(lineaL);
             } catch (NumberFormatException e) {
@@ -722,7 +743,7 @@ public class GameServer {
                 return;
             }
 
-            int plataforma = -1; // no aplica
+            Integer plataforma = -1; // no aplica
             crearEnemigoComoAdmin(evento, tipo, liana, plataforma);
 
         } else if (opDest == 2) {
@@ -730,7 +751,7 @@ public class GameServer {
             System.out.print("  Plataforma (0.." + (LayoutDKJr.getCantidadPlataformas() - 1) + "): ");
             String lineaP = sc.nextLine().trim();
 
-            int plataforma;
+            Integer plataforma;
             try {
                 plataforma = Integer.parseInt(lineaP);
             } catch (NumberFormatException e) {
@@ -743,7 +764,7 @@ public class GameServer {
                 return;
             }
 
-            int liana = 0; // no se usa realmente para plataforma, pero ponemos algo válido
+            Integer liana = 0; // no se usa realmente para plataforma, pero ponemos algo válido
             crearEnemigoComoAdmin(evento, tipo, liana, plataforma);
 
         } else {
@@ -759,7 +780,7 @@ public class GameServer {
         Evento evento = leerEvento(sc);
         if (evento == null) return;
         // Validar que el evento tenga al menos un cliente activo
-        if (!tieneClientesEnEvento(evento)) {
+        if (!tieneClientesEnEvento(evento).booleanValue()) {
             System.out.println("  [ADMIN] No hay clientes activos en " + evento +
                             ". No se crearán frutas en este juego.");
             return;
@@ -768,7 +789,7 @@ public class GameServer {
         // 2) Liana
         System.out.print("  Liana (0.." + (LayoutDKJr.getCantidadLianas() - 1) + "): ");
         String lineaL = sc.nextLine().trim();
-        int liana;
+        Integer liana;
         try {
             liana = Integer.parseInt(lineaL);
         } catch (NumberFormatException e) {
@@ -787,7 +808,7 @@ public class GameServer {
         System.out.println("    2) Abajo");
         System.out.print("  Opción: ");
         String lineaAlt = sc.nextLine().trim();
-        int altura;
+        Integer altura;
         try {
             altura = Integer.parseInt(lineaAlt);
         } catch (NumberFormatException e) {
@@ -802,7 +823,7 @@ public class GameServer {
         // 4) Puntos
         System.out.print("  Puntos de la fruta: ");
         String lineaPts = sc.nextLine().trim();
-        int puntos;
+        Integer puntos;
         try {
             puntos = Integer.parseInt(lineaPts);
         } catch (NumberFormatException e) {
@@ -821,15 +842,15 @@ public class GameServer {
         Evento evento = leerEvento(sc);
         if (evento == null) return;
         // Validar que el evento tenga al menos un cliente activo
-        if (!tieneClientesEnEvento(evento)) {
+        if (!tieneClientesEnEvento(evento).booleanValue()) {
             System.out.println("  [ADMIN] No hay clientes activos en " + evento +
                             ". No se eliminarán frutas en este juego (estado inactivo).");
             return;
         }
 
         // 2) Liana
-        int maxLianas = LayoutDKJr.getCantidadLianas() - 1;
-        int liana = leerEnteroEnRango(sc, 
+        Integer maxLianas = LayoutDKJr.getCantidadLianas() - 1;
+        Integer liana = leerEnteroEnRango(sc, 
                 "  Liana", 
                 0, 
                 maxLianas);
@@ -839,7 +860,7 @@ public class GameServer {
         System.out.println("    0) Arriba");
         System.out.println("    1) Medio");
         System.out.println("    2) Abajo");
-        int altura = leerEnteroEnRango(sc, 
+        Integer altura = leerEnteroEnRango(sc, 
                 "  Opción de altura", 
                 0, 
                 2);
@@ -893,15 +914,15 @@ public class GameServer {
      * Crear enemigo desde la consola del admin.
      * Recibe el evento, el tipo de enemigo y la ubicación lógica.
      */
-    public void crearEnemigoComoAdmin(Evento evento, String tipo, int liana, int plataforma) {
+    public void crearEnemigoComoAdmin(Evento evento, String tipo,  Integer liana, Integer plataforma) {
         GestorJuego gestorEvento = gestores.get(evento);
         if (gestorEvento == null) {
             System.out.println("[ADMIN] No existe GestorJuego para " + evento);
             return;
         }
 
-        float x;
-        float y;
+        Float x;
+        Float y;
         String tipoFinal = tipo;
 
         if ("CROC_BLUE".equalsIgnoreCase(tipo)) {
@@ -938,15 +959,15 @@ public class GameServer {
     /**
      * Crear fruta desde la consola del admin.
      */
-    public void crearFrutaComoAdmin(Evento evento, int liana, int alturaIndex, int puntos) {
+    public void crearFrutaComoAdmin(Evento evento, Integer liana, Integer alturaIndex, Integer puntos) {
         GestorJuego gestorEvento = gestores.get(evento);
         if (gestorEvento == null) {
             System.out.println("[ADMIN] No existe GestorJuego para " + evento);
             return;
         }
 
-        float x = LayoutDKJr.getXForLiana(liana);
-        float y = LayoutDKJr.getYOnLiana(liana, alturaIndex);
+        Float x = LayoutDKJr.getXForLiana(liana);
+        Float y = LayoutDKJr.getYOnLiana(liana, alturaIndex);
 
         // 1) Crear en el gestor de ESTE evento
         gestorEvento.crearFruta(x, y, puntos);
@@ -963,20 +984,20 @@ public class GameServer {
     /**
      * Elimina una fruta desde la consola del admin.
      */
-    public void eliminarFrutaComoAdmin(Evento evento, int liana, int alturaIndex) {
+    public void eliminarFrutaComoAdmin(Evento evento,  Integer liana, Integer alturaIndex) {
         GestorJuego gestorEvento = gestores.get(evento);
         if (gestorEvento == null) {
             System.out.println("[ADMIN] No existe GestorJuego para " + evento);
             return;
         }
 
-        float x = LayoutDKJr.getXForLiana(liana);
-        float y = LayoutDKJr.getYOnLiana(liana, alturaIndex);
+        Float x = LayoutDKJr.getXForLiana(liana);
+        Float y = LayoutDKJr.getYOnLiana(liana, alturaIndex);
 
         // Elimina en el gestor de ESTE evento (usa una tolerancia pequeña en píxeles)
-        boolean ok = gestorEvento.eliminarFrutaPorPosicion(x, y, 5.0f);
+        Boolean ok = gestorEvento.eliminarFrutaPorPosicion(x, y, 5.0f);
 
-        if (ok) {
+        if (ok.booleanValue()) {
             System.out.println("[ADMIN] Fruta ELIMINADA en " + evento +
                     " (liana=" + liana + ", altura=" + alturaIndex +
                     ") -> (" + x + ", " + y + ")");
@@ -1001,9 +1022,9 @@ public class GameServer {
             System.out.println("[ADMIN] Consola de administración iniciada");
             System.out.println("===========================================");
 
-            boolean seguir = true;
+            Boolean seguir = Boolean.TRUE;
 
-            while (seguir) {
+            while (seguir.booleanValue()) {
                 System.out.println();
                 System.out.println("========= MENÚ ADMIN =========");
                 System.out.println("  1) Crear enemigo");
@@ -1014,12 +1035,12 @@ public class GameServer {
                 System.out.println("  0) Salir de consola admin");
                 System.out.println("================================");
 
-                int opcion = leerEnteroEnRango(sc, "[ADMIN] Opción", 0, 5);
+                Integer opcion = leerEnteroEnRango(sc, "[ADMIN] Opción", 0, 5);
 
                 switch (opcion) {
                     case 0:
                         System.out.println("[ADMIN] Consola de administración finalizada.");
-                        seguir = false;
+                        seguir = Boolean.FALSE;
                         break;
 
                     case 1:
@@ -1061,7 +1082,7 @@ public class GameServer {
             }
         });
 
-        adminThread.setDaemon(true); // no impide que el server se cierre si el main termina
+        adminThread.setDaemon(Boolean.TRUE); // no impide que el server se cierre si el main termina
         adminThread.start();
     }
 
@@ -1073,10 +1094,10 @@ public class GameServer {
 
         // ---- Lianas ----
         try {
-            int numLianas = LayoutDKJr.getCantidadLianas();
+            Integer numLianas = LayoutDKJr.getCantidadLianas();
             System.out.println("-- LIANAS (índice -> x aproximada) --");
-            for (int i = 0; i < numLianas; i++) {
-                float x = LayoutDKJr.getXForLiana(i);
+            for (Integer i = 0; i < numLianas; i++) {
+                Float x = LayoutDKJr.getXForLiana(i);
                 System.out.printf("  Liana %d -> x = %.1f%n", i, x);
             }
         } catch (Exception e) {
@@ -1085,10 +1106,10 @@ public class GameServer {
 
         // ---- Plataformas ----
         try {
-            int numPlataformas = LayoutDKJr.getCantidadPlataformas();
+            Integer numPlataformas = LayoutDKJr.getCantidadPlataformas();
             System.out.println("-- PLATAFORMAS (índice -> y aproximada) --");
-            for (int i = 0; i < numPlataformas; i++) {
-                float y = LayoutDKJr.getYForPlataforma(i);
+            for (Integer i = 0; i < numPlataformas; i++) {
+                Float y = LayoutDKJr.getYForPlataforma(i);
                 System.out.printf("  Plataforma %d -> y = %.1f%n", i, y);
             }
         } catch (Exception e) {
@@ -1104,7 +1125,7 @@ public class GameServer {
     // =============== MAIN ===============
     
     public static void main(String[] args) {
-        int port = 8080;
+        Integer port = 8080;
         
         // Permitir especificar puerto como argumento
         if (args.length > 0) {

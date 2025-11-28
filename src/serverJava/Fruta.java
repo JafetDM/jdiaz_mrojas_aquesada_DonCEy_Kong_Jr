@@ -3,43 +3,43 @@ package serverJava;
 
 public class Fruta implements ElementoJuego {
 
-    private static int SIGUIENTE_ID = 1000;
+    private static Integer SIGUIENTE_ID = 1000;
 
-    private final int id;
-    private final float x;
-    private final float y;
-    private final int puntos;
+    private final Integer id;
+    private final Float x;
+    private final Float y;
+    private final Integer puntos;
     private final String tipo;
     private static final String[] TIPOS_FRUTA = { "MANGO", "BANANO", "MANZANA" };
 
-    public Fruta(float x, float y, int puntos) {
+    public Fruta(Float x, Float y, Integer puntos) {
         this.id = SIGUIENTE_ID++;
         this.x = x;
         this.y = y;
         this.puntos = puntos;
 
         // Elegir tipo aleatorio
-        int idx = (int)(Math.random() * TIPOS_FRUTA.length);
+        Integer idx = (int)(Math.random() * TIPOS_FRUTA.length);
         this.tipo = TIPOS_FRUTA[idx];
     }
 
     @Override
-    public int getId() { return id; }
+    public Integer getId() { return id; }
 
     @Override
-    public float getX() { return x; }
+    public Float getX() { return x; }
 
     @Override
-    public float getY() { return y; }
+    public Float getY() { return y; }
 
-    public int getPuntos() { return puntos; }
+    public Integer getPuntos() { return puntos; }
 
     public String getTipoFruta() {
         return tipo;
     }
 
     @Override
-    public void actualizar(float dt) {
+    public void actualizar(Float dt) {
         // la fruta no se mueve
     }
 
